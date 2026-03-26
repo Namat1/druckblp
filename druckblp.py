@@ -1298,8 +1298,8 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     tour_overview_html = render_tour_overview(customer_rows)
     plan_table_html    = render_plan_table(customer_rows)
 
-    # Kunden-Nr. = CSB-Nummer (4-stellig) ohne führende Null/langen SAP-Key
-    kunden_nr = csb_nr if csb_nr else sap_nr
+    # Kunden-Nr. im Kopf immer aus der SAP-Nummer
+    kunden_nr = sap_nr
 
     return f"""
     <div class="paper">
