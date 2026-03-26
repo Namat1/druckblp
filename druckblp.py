@@ -1,10 +1,6 @@
-
-from __future__ import annotations
-
 import html
 import io
 import json
-import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -21,6 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+
 WOCHENTAGE = {
     1: "Montag",
     2: "Dienstag",
@@ -30,32 +27,12 @@ WOCHENTAGE = {
     6: "Samstag",
 }
 
-WOCHENTAGE_KURZ = {
-    "Mo": "Montag",
-    "Mon": "Montag",
-    "Die": "Dienstag",
-    "Di": "Dienstag",
-    "Dienstag": "Dienstag",
-    "Mi": "Mittwoch",
-    "Mitt": "Mittwoch",
-    "Mittwoch": "Mittwoch",
-    "Do": "Donnerstag",
-    "Don": "Donnerstag",
-    "Donnerstag": "Donnerstag",
-    "Fr": "Freitag",
-    "Freitag": "Freitag",
-    "Sa": "Samstag",
-    "Samstag": "Samstag",
-    "So": "Sonntag",
-    "Sonntag": "Sonntag",
-}
-
 KATEGORIEN = ["Alle", "Malchow", "NMS", "MK", "Direkt"]
 
-UPLOAD_SPECS = {
+UPLOAD_CONFIG = {
     "kunden": {
-        "label": "Kundenliste",
-        "sheet_default": "Liste m.Form",
+        "label": "Kundenliste hochladen",
+        "help": "Verwendet feste Excel-Spalten: A, I, J, K, L, M, N",
         "mapping": {
             "Fachberater": "A",
             "CSB_Nr": "I",
@@ -65,11 +42,12 @@ UPLOAD_SPECS = {
             "PLZ": "M",
             "Ort": "N",
         },
+        "required": ["Fachberater", "CSB_Nr", "SAP_Nr", "Name", "Strasse", "PLZ", "Ort"],
         "key": "SAP_Nr",
     },
     "sap": {
-        "label": "SAP-Datei",
-        "sheet_default": "Rohdaten",
+        "label": "SAP-Datei hochladen",
+        "help": "Verwendet feste Excel-Spalten: A, H, I, O, Y",
         "mapping": {
             "SAP_Nr": "A",
             "Bestelltag": "H",
@@ -77,394 +55,308 @@ UPLOAD_SPECS = {
             "Liefertyp_ID": "O",
             "Rahmentour_Raw": "Y",
         },
+        "required": ["SAP_Nr", "Bestelltag", "Bestellzeitende", "Liefertyp_ID", "Rahmentour_Raw"],
         "key": "SAP_Nr",
     },
     "transport": {
-        "label": "Transportgruppen",
-        "sheet_default": "Tabelle1",
+        "label": "Transportgruppen hochladen",
+        "help": "Verwendet feste Excel-Spalten: A, C",
         "mapping": {
             "Liefertyp_ID": "A",
             "Liefertyp_Name": "C",
         },
+        "required": ["Liefertyp_ID", "Liefertyp_Name"],
         "key": "Liefertyp_ID",
     },
 }
 
-KISOFT_REQUIRED_COLUMNS = [
-    "SAP Rahmentour",
-    "CSB Tournummer",
-    "Wochentag",
-    "Bereitstelldatum und -zeit",
-    "Verladetor",
-]
-
-KOSTENPLAN_LIEFERANTEN = {
-    "Lagerware": (4, 5, 6),
-    "AVO": (7, 8, 9),
-    "Werbemittel Sonder": (10, 11, 12),
-    "Werbemittel": (13, 14, 15),
-    "Hamburger Jungs": (16, 17, 18),
-}
+KISOFT_REQUIRED_COLUMNS = ["SAP Rahmentour", "CSB Tournummer", "Verladetor"]
+KOSTENSTELLEN_REQUIRED_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "leiter"]
 
 
-def normalize_text(value: object) -> str:
+# ============================================================
+# HILFSFUNKTIONEN
+# ============================================================
+def normalize_text(value) -> str:
     if pd.isna(value):
         return ""
-    return str(value).replace("\xa0", " ").strip()
+    return str(value).strip()
 
 
-def normalize_digits(value: object) -> str:
-    return "".join(ch for ch in normalize_text(value) if ch.isdigit())
+def normalize_digits(value) -> str:
+    text = normalize_text(value)
+    digits = "".join(ch for ch in text if ch.isdigit())
+    return digits if digits else text
 
 
-def day_name_from_number(value: object) -> str:
+def day_name_from_number(value) -> str:
     try:
-        return WOCHENTAGE[int(float(normalize_text(value)))]
-    except Exception:
-        return normalize_text(value)
+        return WOCHENTAGE.get(int(str(value).strip()), "Unbekannt")
+    except (TypeError, ValueError):
+        return "Unbekannt"
 
 
-def day_name_from_short(value: object) -> str:
-    text = normalize_text(value)
-    if not text:
-        return ""
-    return WOCHENTAGE_KURZ.get(text, text)
+def build_kisoft_key(rahmentour_raw: str) -> str:
+    raw = normalize_text(rahmentour_raw)
+    return f"00{raw[:8]}" if raw else ""
 
 
-def excel_column_to_index(letter: str) -> int:
-    result = 0
-    for char in letter.upper():
-        if not ("A" <= char <= "Z"):
-            raise ValueError(f"Ungültiger Spaltenbuchstabe: {letter}")
-        result = result * 26 + (ord(char) - ord("A") + 1)
-    return result - 1
+def is_mk_pattern(csb_nr: str) -> bool:
+    csb = normalize_digits(csb_nr)
+    return len(csb) == 4 and (csb.endswith("881") or csb.endswith("884"))
 
 
-def parse_range_text(range_text: object) -> List[Tuple[int, int]]:
-    text = normalize_text(range_text)
-    if not text:
-        return []
-
-    parts = [part.strip() for part in text.split("+")]
-    ranges: List[Tuple[int, int]] = []
-    prefix_base: Optional[int] = None
-
-    for part in parts:
-        numbers = re.findall(r"\d+", part)
-        if not numbers:
-            continue
-
-        if "-" in part and len(numbers) >= 2:
-            start = int(numbers[0])
-            end = int(numbers[1])
-            ranges.append((start, end))
-            if start >= 1000:
-                prefix_base = (start // 1000) * 1000
-        else:
-            value = int(numbers[0])
-            if prefix_base is not None and value < 100:
-                value = prefix_base + value
-            ranges.append((value, value))
-
-    return ranges
-
-
-def build_kisoft_key(rahmentour_raw: object) -> str:
-    digits = normalize_digits(rahmentour_raw)
-    if not digits:
-        return ""
-    return f"00{digits[:8]}"
-
-
-def format_clock(value: object) -> str:
-    text = normalize_text(value)
-    if not text:
-        return ""
-    if ":" in text:
-        return text.replace(" ", "")
-    digits = re.sub(r"\D", "", text)
-    if len(digits) == 4:
-        return f"{digits[:2]}:{digits[2:]}"
-    if len(digits) == 3:
-        return f"0{digits[0]}:{digits[1:]}"
-    if len(digits) == 2:
-        return f"{digits}:00"
-    return text
-
-
-def classify_customer(rahmentour_raw: object, csb_nr: object) -> str:
-    rahmentour_text = normalize_text(rahmentour_raw).upper()
-    csb_text = normalize_digits(csb_nr)
-
-    if "M" in rahmentour_text:
+def classify_customer(rahmentour_raw: str, csb_nr: str) -> str:
+    route = normalize_text(rahmentour_raw).upper()
+    if "M" in route:
         return "Malchow"
-    if "N" in rahmentour_text:
+    if "N" in route:
         return "NMS"
-    if re.fullmatch(r"\d884", csb_text) or re.fullmatch(r"\d881", csb_text):
+    if is_mk_pattern(csb_nr):
         return "MK"
     return "Direkt"
 
 
-@st.cache_data(show_spinner=False)
-def list_excel_sheets(file_bytes: bytes) -> List[str]:
-    excel_file = pd.ExcelFile(io.BytesIO(file_bytes))
-    return list(excel_file.sheet_names)
+def validate_required_columns(df: pd.DataFrame, required_columns: List[str], name: str) -> None:
+    missing = [col for col in required_columns if col not in df.columns]
+    if missing:
+        raise ValueError(f"{name} fehlt Pflichtspalten: {', '.join(missing)}")
 
 
-@st.cache_data(show_spinner=False)
-def read_excel_raw(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
-    return pd.read_excel(io.BytesIO(file_bytes), sheet_name=sheet_name, header=None, dtype=str)
+def excel_column_to_index(column_letter: str) -> int:
+    result = 0
+    for char in column_letter.upper():
+        if not char.isalpha():
+            raise ValueError(f"Ungültiger Spaltenbuchstabe: {column_letter}")
+        result = result * 26 + (ord(char) - ord("A") + 1)
+    return result - 1
 
 
-@st.cache_data(show_spinner=False)
-def read_csv_table(file_bytes: bytes, filename: str, separator: str) -> pd.DataFrame:
-    errors: List[str] = []
-    for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
-        try:
-            return pd.read_csv(
-                io.BytesIO(file_bytes),
-                sep=separator,
-                dtype=str,
-                encoding=encoding,
+def read_upload_to_raw_dataframe(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    suffix = Path(filename).suffix.lower()
+
+    if suffix == ".csv":
+        errors = []
+        for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
+            try:
+                return pd.read_csv(
+                    io.BytesIO(file_bytes),
+                    sep=csv_separator,
+                    header=None,
+                    dtype=str,
+                    encoding=encoding,
+                    keep_default_na=False,
+                )
+            except Exception as exc:  # pragma: no cover
+                errors.append(f"{encoding}: {exc}")
+        raise ValueError(f"CSV konnte nicht gelesen werden. Versuchte Encodings: {' | '.join(errors)}")
+
+    if suffix in {".xlsx", ".xls", ".xlsm"}:
+        return pd.read_excel(
+            io.BytesIO(file_bytes),
+            header=None,
+            dtype=str,
+        )
+
+    raise ValueError(f"Nicht unterstütztes Dateiformat: {suffix}")
+
+
+def extract_columns_by_letter(raw_df: pd.DataFrame, mapping: Dict[str, str], dataset_name: str) -> pd.DataFrame:
+    extracted: Dict[str, pd.Series] = {}
+    for target_name, column_letter in mapping.items():
+        column_index = excel_column_to_index(column_letter)
+        if column_index >= raw_df.shape[1]:
+            raise ValueError(
+                f"{dataset_name}: benötigte Spalte {column_letter} ist nicht vorhanden. "
+                f"Gefundene Spaltenanzahl: {raw_df.shape[1]}"
             )
-        except Exception as exc:
-            errors.append(f"{encoding}: {exc}")
-    raise ValueError(f"{filename} konnte nicht gelesen werden: {' | '.join(errors)}")
+        extracted[target_name] = raw_df.iloc[:, column_index]
+    return pd.DataFrame(extracted)
 
 
-def cleanup_dataframe(df: pd.DataFrame, key_column: Optional[str] = None) -> pd.DataFrame:
+def cleanup_dataframe(df: pd.DataFrame, key_column: str) -> pd.DataFrame:
     result = df.copy()
     for column in result.columns:
         result[column] = result[column].map(normalize_text)
 
-    result = result.replace("", pd.NA).dropna(how="all").fillna("").reset_index(drop=True)
-    if key_column and key_column in result.columns:
-        result = result[result[key_column].map(normalize_text) != ""].reset_index(drop=True)
-    return result
+    result = result.replace("", pd.NA).dropna(how="all").fillna("")
+    result = result[result[key_column].map(normalize_text) != ""].copy()
 
+    if not result.empty:
+        first_key = normalize_text(result.iloc[0][key_column]).lower()
+        header_like_tokens = {
+            key_column.lower(),
+            key_column.lower().replace("_", " "),
+            "sap",
+            "sap-nr",
+            "sap nr",
+            "liefertyp_id",
+            "liefertyp id",
+            "sap rahmentour",
+            "sap_von",
+            "sap von",
+            "csb tournummer",
+        }
+        if first_key in header_like_tokens:
+            result = result.iloc[1:].copy()
 
-def drop_header_row_if_needed(df: pd.DataFrame, key_column: str) -> pd.DataFrame:
-    if df.empty:
-        return df
-    first_row = " | ".join(normalize_text(v).lower() for v in df.iloc[0].tolist())
-    first_key = normalize_text(df.iloc[0].get(key_column, "")).lower()
-    tokens = [
-        "sap-nr",
-        "sap nr",
-        "debitoren",
-        "kundennummer",
-        "marktname",
-        "bestellzeit",
-        "liefertyp",
-        "transport",
-        "ort",
-        "strasse",
-    ]
-    if any(token in first_row or token in first_key for token in tokens):
-        return df.iloc[1:].reset_index(drop=True)
-    return df
-
-
-def extract_fixed_columns(raw_df: pd.DataFrame, mapping: Dict[str, str], label: str) -> pd.DataFrame:
-    data: Dict[str, pd.Series] = {}
-    for target_name, column_letter in mapping.items():
-        column_index = excel_column_to_index(column_letter)
-        if column_index >= raw_df.shape[1]:
-            raise ValueError(f"{label}: Spalte {column_letter} fehlt.")
-        data[target_name] = raw_df.iloc[:, column_index]
-    return pd.DataFrame(data)
+    return result.reset_index(drop=True)
 
 
 @st.cache_data(show_spinner=False)
-def load_fixed_excel_dataset(file_bytes: bytes, dataset_key: str, sheet_name: str) -> pd.DataFrame:
-    spec = UPLOAD_SPECS[dataset_key]
-    raw_df = read_excel_raw(file_bytes, sheet_name)
-    df = extract_fixed_columns(raw_df, spec["mapping"], spec["label"])
-    df = cleanup_dataframe(df, spec["key"])
-    df = drop_header_row_if_needed(df, spec["key"])
-    return df.reset_index(drop=True)
+def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str, dataset_key: str) -> pd.DataFrame:
+    config = UPLOAD_CONFIG[dataset_key]
+    raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
+    structured_df = extract_columns_by_letter(raw_df, config["mapping"], config["label"])
+    structured_df = cleanup_dataframe(structured_df, config["key"])
+    validate_required_columns(structured_df, config["required"], config["label"])
+    return structured_df
 
 
 @st.cache_data(show_spinner=False)
-def load_kisoft_dataset(file_bytes: bytes, filename: str, separator: str) -> pd.DataFrame:
-    df = read_csv_table(file_bytes, filename, separator)
-    rename_map: Dict[str, str] = {}
-    for column in df.columns:
-        clean_col = normalize_text(column).replace('"', "")
-        rename_map[column] = clean_col
-    df = df.rename(columns=rename_map)
+def load_kisoft_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
 
-    missing = [col for col in KISOFT_REQUIRED_COLUMNS if col not in df.columns]
-    if missing:
-        raise ValueError(f"Kisoft-Datei: Pflichtspalten fehlen: {', '.join(missing)}")
+    if raw_df.shape[1] >= 3:
+        df = raw_df.iloc[:, :3].copy()
+        df.columns = KISOFT_REQUIRED_COLUMNS
+        df = cleanup_dataframe(df, "SAP Rahmentour")
+        first_row_values = {normalize_text(value).lower() for value in df.head(1).iloc[0].tolist()} if not df.empty else set()
+        if first_row_values & {"sap rahmentour", "csb tournummer", "verladetor"}:
+            df = df.iloc[1:].reset_index(drop=True)
+    else:
+        raise ValueError("Kisoft-Datei muss mindestens 3 Spalten enthalten.")
 
-    df = cleanup_dataframe(df[KISOFT_REQUIRED_COLUMNS].copy(), "SAP Rahmentour")
+    for column in KISOFT_REQUIRED_COLUMNS:
+        df[column] = df[column].map(normalize_text)
+
+    validate_required_columns(df, KISOFT_REQUIRED_COLUMNS, "Kisoft-Datei")
     return df
 
 
 @st.cache_data(show_spinner=False)
-def load_kostenplan_dataset(file_bytes: bytes, sheet_name: str) -> pd.DataFrame:
-    raw_df = read_excel_raw(file_bytes, sheet_name).fillna("")
-    raw_df = raw_df.apply(lambda col: col.map(normalize_text))
+def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    suffix = Path(filename).suffix.lower()
 
-    records: List[Dict[str, str]] = []
-    for row_idx in range(len(raw_df)):
-        day_name = normalize_text(raw_df.iloc[row_idx, 3] if raw_df.shape[1] > 3 else "")
-        if day_name not in WOCHENTAGE.values():
-            continue
-
-        next_idx = row_idx + 1
-        while next_idx < len(raw_df):
-            row = raw_df.iloc[next_idx]
-            label = normalize_text(row.iloc[0] if raw_df.shape[1] > 0 else "")
-            range_text = normalize_text(row.iloc[1] if raw_df.shape[1] > 1 else "")
-
-            if not label and not range_text:
-                break
-            if label == "Tourengruppen":
-                break
-            if "Kostenst." in normalize_text(row.iloc[2] if raw_df.shape[1] > 2 else ""):
-                next_idx += 1
-                continue
-
-            record: Dict[str, str] = {
-                "Liefertag": day_name,
-                "Tourgruppenname": label,
-                "Bereich": range_text,
-                "Kostenstelle": normalize_text(row.iloc[2] if raw_df.shape[1] > 2 else ""),
-                "Leiter": normalize_text(row.iloc[3] if raw_df.shape[1] > 3 else ""),
-            }
-
-            for supplier_name, (idx_time, idx_lead, idx_day) in KOSTENPLAN_LIEFERANTEN.items():
-                record[f"{supplier_name}_Zeit"] = normalize_text(row.iloc[idx_time] if raw_df.shape[1] > idx_time else "")
-                record[f"{supplier_name}_Vorlauf"] = normalize_text(row.iloc[idx_lead] if raw_df.shape[1] > idx_lead else "")
-                record[f"{supplier_name}_Bestelltag"] = normalize_text(row.iloc[idx_day] if raw_df.shape[1] > idx_day else "")
-            records.append(record)
-            next_idx += 1
-
-    if not records:
-        raise ValueError("Im Kostenstellenplan konnten keine Tourgruppenblöcke gelesen werden.")
-
-    return pd.DataFrame(records)
-
-
-def lookup_kostenplan_row(csb_tournummer: object, df_kostenplan: pd.DataFrame) -> Optional[pd.Series]:
-    digits = normalize_digits(csb_tournummer)
-    if not digits:
-        return None
-
-    number = int(digits)
-    for _, row in df_kostenplan.iterrows():
-        for start, end in parse_range_text(row.get("Bereich", "")):
-            if start <= number <= end:
-                return row
-    return None
-
-
-def summarize_cost_schedules(customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> List[Dict[str, object]]:
-    if customer_rows.empty:
-        return []
-
-    unique_tours = (
-        customer_rows[["CSB Tournummer", "Wochentag"]]
-        .drop_duplicates()
-        .sort_values(["CSB Tournummer", "Wochentag"], na_position="last")
-    )
-
-    schedules: List[Dict[str, object]] = []
-    for _, tour_row in unique_tours.iterrows():
-        csb_tour = normalize_text(tour_row.get("CSB Tournummer", ""))
-        lookup = lookup_kostenplan_row(csb_tour, df_kostenplan)
-        if lookup is None:
-            schedules.append(
-                {
-                    "csb_tour": csb_tour,
-                    "liefertag": day_name_from_short(tour_row.get("Wochentag", "")),
-                    "tourengruppe": "",
-                    "kostenstelle": "",
-                    "leiter": "",
-                    "supplier_rows": [],
-                    "hinweis": "Keine Zuordnung im Kostenstellenplan gefunden.",
-                }
-            )
-            continue
-
-        supplier_rows: List[Dict[str, str]] = []
-        for supplier_name in KOSTENPLAN_LIEFERANTEN:
-            zeit = format_clock(lookup.get(f"{supplier_name}_Zeit", ""))
-            vorlauf = normalize_text(lookup.get(f"{supplier_name}_Vorlauf", ""))
-            bestelltag = day_name_from_short(lookup.get(f"{supplier_name}_Bestelltag", ""))
-            if zeit or vorlauf or bestelltag:
-                supplier_rows.append(
-                    {
-                        "lieferant": supplier_name,
-                        "zeit": zeit,
-                        "vorlauf": vorlauf,
-                        "bestelltag": bestelltag,
-                    }
+    if suffix == ".csv":
+        for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
+            try:
+                df = pd.read_csv(
+                    io.BytesIO(file_bytes),
+                    sep=csv_separator,
+                    dtype=str,
+                    encoding=encoding,
+                    keep_default_na=False,
                 )
+                break
+            except Exception:
+                df = None
+        if df is None:
+            raise ValueError("Kostenstellen-CSV konnte nicht gelesen werden.")
+    else:
+        df = pd.read_excel(io.BytesIO(file_bytes), dtype=str)
 
-        schedules.append(
+    df.columns = [normalize_text(column) for column in df.columns]
+    missing = [col for col in KOSTENSTELLEN_REQUIRED_COLUMNS if col not in df.columns]
+
+    if missing:
+        raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
+        if raw_df.shape[1] < 4:
+            raise ValueError("Kostenstellen-Datei benötigt mindestens 4 Spalten.")
+        df = raw_df.iloc[:, :4].copy()
+        df.columns = KOSTENSTELLEN_REQUIRED_COLUMNS
+
+    df = cleanup_dataframe(df, "sap_von")
+    for column in KOSTENSTELLEN_REQUIRED_COLUMNS:
+        df[column] = df[column].map(normalize_text)
+
+    validate_required_columns(df, KOSTENSTELLEN_REQUIRED_COLUMNS, "Kostenstellen-Datei")
+    return df
+
+
+# ============================================================
+# LOOKUP UND AUFBEREITUNG
+# ============================================================
+def apply_kostenstellen_lookup(df_base: pd.DataFrame, df_kostenstellen: pd.DataFrame) -> pd.DataFrame:
+    table = df_kostenstellen.copy()
+    table["sap_von_num"] = pd.to_numeric(table["sap_von"].map(normalize_digits), errors="coerce")
+    table["sap_bis_num"] = pd.to_numeric(table["sap_bis"].map(normalize_digits), errors="coerce")
+
+    def lookup_row(sap_nr: str) -> pd.Series:
+        sap_num = pd.to_numeric(normalize_digits(sap_nr), errors="coerce")
+        if pd.isna(sap_num):
+            return pd.Series({"Tourengruppe": "", "Leiter": ""})
+
+        match = table[(table["sap_von_num"] <= sap_num) & (table["sap_bis_num"] >= sap_num)]
+        if match.empty:
+            return pd.Series({"Tourengruppe": "", "Leiter": ""})
+
+        row = match.iloc[0]
+        return pd.Series(
             {
-                "csb_tour": csb_tour,
-                "liefertag": normalize_text(lookup.get("Liefertag", "")) or day_name_from_short(tour_row.get("Wochentag", "")),
-                "tourengruppe": normalize_text(lookup.get("Tourgruppenname", "")),
-                "bereich": normalize_text(lookup.get("Bereich", "")),
-                "kostenstelle": normalize_text(lookup.get("Kostenstelle", "")),
-                "leiter": normalize_text(lookup.get("Leiter", "")),
-                "supplier_rows": supplier_rows,
-                "hinweis": "",
+                "Tourengruppe": normalize_text(row["tourengruppe"]),
+                "Leiter": normalize_text(row["leiter"]),
             }
         )
 
-    return schedules
+    result = df_base.copy()
+    result[["Tourengruppe", "Leiter"]] = result["SAP_Nr"].apply(lookup_row)
+    return result
 
 
 @st.cache_data(show_spinner=False)
 def prepare_dataframes(
     kunden_bytes: bytes,
+    kunden_name: str,
     sap_bytes: bytes,
+    sap_name: str,
     transport_bytes: bytes,
+    transport_name: str,
     kisoft_bytes: bytes,
-    kostenplan_bytes: bytes,
+    kisoft_name: str,
+    kostenstellen_bytes: bytes,
+    kostenstellen_name: str,
     csv_separator: str,
-    kunden_sheet: str,
-    sap_sheet: str,
-    transport_sheet: str,
-    kostenplan_sheet: str,
-) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    df_kunden = load_fixed_excel_dataset(kunden_bytes, "kunden", kunden_sheet)
-    df_sap = load_fixed_excel_dataset(sap_bytes, "sap", sap_sheet)
-    df_transport = load_fixed_excel_dataset(transport_bytes, "transport", transport_sheet)
-    df_kisoft = load_kisoft_dataset(kisoft_bytes, "Kisoft.csv", csv_separator)
-    df_kostenplan = load_kostenplan_dataset(kostenplan_bytes, kostenplan_sheet)
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
+    df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
+    df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
+    df_transport = load_structured_upload(transport_bytes, transport_name, csv_separator, "transport")
+    df_kisoft = load_kisoft_upload(kisoft_bytes, kisoft_name, csv_separator)
+    df_kostenstellen = load_kostenstellen_upload(kostenstellen_bytes, kostenstellen_name, csv_separator)
 
-    df_sap["Bestelltag_Name"] = df_sap["Bestelltag"].map(day_name_from_number)
+    for column in df_kunden.columns:
+        df_kunden[column] = df_kunden[column].map(normalize_text)
+
+    for column in df_sap.columns:
+        df_sap[column] = df_sap[column].map(normalize_text)
+
+    for column in df_transport.columns:
+        df_transport[column] = df_transport[column].map(normalize_text)
+
+    for column in df_kisoft.columns:
+        df_kisoft[column] = df_kisoft[column].map(normalize_text)
+
     df_sap["Kisoft_Key"] = df_sap["Rahmentour_Raw"].map(build_kisoft_key)
+    df_sap["Bestelltag_Name"] = df_sap["Bestelltag"].map(day_name_from_number)
 
     df_sap = df_sap.merge(df_transport, on="Liefertyp_ID", how="left")
     df_sap = df_sap.merge(
-        df_kisoft[KISOFT_REQUIRED_COLUMNS],
+        df_kisoft[["SAP Rahmentour", "CSB Tournummer", "Verladetor"]],
         left_on="Kisoft_Key",
         right_on="SAP Rahmentour",
         how="left",
     )
 
-    df_sap["Wochentag"] = df_sap["Wochentag"].map(day_name_from_short)
-    df_sap["CSB Tournummer"] = df_sap["CSB Tournummer"].map(normalize_text)
-    df_sap["Verladetor"] = df_sap["Verladetor"].map(normalize_text)
+    def infer_liefertag(row: pd.Series) -> str:
+        csb_tour = normalize_digits(row.get("CSB Tournummer", ""))
+        if csb_tour and csb_tour[0].isdigit():
+            day = int(csb_tour[0])
+            if day in WOCHENTAGE:
+                return WOCHENTAGE[day]
+        return row.get("Bestelltag_Name", "Unbekannt")
 
-    # Doppelte Planzeilen entfernen:
-    # gleiche SAP-Nummer + gleicher Bestelltag + gleicher Liefertyp nur einmal.
-    df_sap = (
-        df_sap.sort_values(["SAP_Nr", "Bestelltag", "Liefertyp_ID", "Bestellzeitende", "Rahmentour_Raw"])
-        .drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID"], keep="first")
-        .reset_index(drop=True)
-    )
-
-    kunden_basis = df_kunden.copy()
-    kunden_basis = kunden_basis.merge(
-        df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates("SAP_Nr"),
+    kunden_basis = df_kunden.merge(
+        df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates(subset=["SAP_Nr"]),
         on="SAP_Nr",
         how="left",
     )
@@ -472,48 +364,44 @@ def prepare_dataframes(
         lambda row: classify_customer(row.get("Rahmentour_Raw", ""), row.get("CSB_Nr", "")),
         axis=1,
     )
+    kunden_basis = apply_kostenstellen_lookup(kunden_basis, df_kostenstellen)
 
     plan_rows = df_sap.merge(
-        kunden_basis[["SAP_Nr", "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater", "Kategorie"]],
+        kunden_basis[
+            [
+                "SAP_Nr",
+                "CSB_Nr",
+                "Name",
+                "Strasse",
+                "PLZ",
+                "Ort",
+                "Fachberater",
+                "Kategorie",
+                "Tourengruppe",
+                "Leiter",
+            ]
+        ],
         on="SAP_Nr",
         how="left",
     )
 
-    def infer_liefertag(row: pd.Series) -> str:
-        weekday = normalize_text(row.get("Wochentag", ""))
-        if weekday:
-            return weekday
-        tour_digits = normalize_digits(row.get("CSB Tournummer", ""))
-        if tour_digits and tour_digits[0].isdigit():
-            day_num = int(tour_digits[0])
-            if day_num in WOCHENTAGE:
-                return WOCHENTAGE[day_num]
-        return normalize_text(row.get("Bestelltag_Name", ""))
-
     plan_rows["Liefertag"] = plan_rows.apply(infer_liefertag, axis=1)
-    plan_rows["Sortiment"] = plan_rows["Liefertyp_Name"].map(normalize_text)
-    plan_rows["Bestellzeitende"] = plan_rows["Bestellzeitende"].map(normalize_text)
-    plan_rows["SortKey_Liefertag"] = plan_rows["Liefertag"].map({name: i for i, name in WOCHENTAGE.items()}).fillna(99)
+    plan_rows["Sortiment"] = plan_rows["Liefertyp_Name"].fillna("")
+    plan_rows["Bestellzeitende"] = plan_rows["Bestellzeitende"].fillna("")
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
-    plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].map(normalize_text)
+    plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("")
 
-    customer_counts = (
-        plan_rows.groupby("SAP_Nr")
-        .size()
-        .rename("Planzeilen_Anzahl")
-        .reset_index()
-    )
-    kunden_basis = kunden_basis.merge(customer_counts, on="SAP_Nr", how="left")
-    kunden_basis["Planzeilen_Anzahl"] = kunden_basis["Planzeilen_Anzahl"].fillna(0).astype(int)
+    counts = {cat: int((kunden_basis["Kategorie"] == cat).sum()) for cat in KATEGORIEN if cat != "Alle"}
+    counts["Alle"] = int(len(kunden_basis))
 
-    return kunden_basis, plan_rows, df_kostenplan
+    return kunden_basis, plan_rows, counts
 
 
-def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str, only_with_plan_rows: bool) -> pd.DataFrame:
+# ============================================================
+# FILTER
+# ============================================================
+def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str) -> pd.DataFrame:
     result = df_customers.copy()
-
-    if only_with_plan_rows:
-        result = result[result["Planzeilen_Anzahl"] > 0]
 
     if category != "Alle":
         result = result[result["Kategorie"] == category]
@@ -528,175 +416,27 @@ def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str
     return result.sort_values(["Name", "SAP_Nr"], na_position="last").reset_index(drop=True)
 
 
+# ============================================================
+# HTML UND CSS
+# ============================================================
 def app_css() -> str:
     return """
     <style>
         :root {
-            --bg: #eef2f7;
-            --sidebar: #dde6f0;
-            --card: #ffffff;
-            --paper: #ffffff;
-            --line: #c6d0db;
-            --line-strong: #9daaba;
-            --text: #16202a;
-            --muted: #526173;
-            --accent: #1b4f72;
-            --accent-soft: #e8f1f8;
             --paper-width: 210mm;
             --paper-min-height: 297mm;
-        }
-
-        html, body, [class*="css"] {
-            color: var(--text) !important;
+            --border-color: #aaaaaa;
+            --muted: #5f6b76;
+            --accent: #1f4e79;
         }
 
         .stApp {
-            background: var(--bg);
-            color: var(--text);
+            background: linear-gradient(180deg, #eef2f7 0%, #f7f9fb 100%);
         }
 
-        .main .block-container {
-            max-width: 1500px;
-            padding-top: 1.2rem;
-            padding-bottom: 2rem;
-        }
-
-        [data-testid="stSidebar"] {
-            background: var(--sidebar) !important;
-            border-right: 1px solid var(--line);
-        }
-
-        [data-testid="stSidebar"] * {
-            color: var(--text) !important;
-        }
-
-        [data-testid="stFileUploaderDropzone"],
-        [data-baseweb="input"],
-        [data-baseweb="select"] > div,
-        .stTextInput input,
-        .stSelectbox [data-baseweb="select"] > div,
-        .stMultiSelect [data-baseweb="select"] > div,
-        textarea,
-        input {
-            background: #ffffff !important;
-            color: var(--text) !important;
-            border-color: var(--line-strong) !important;
-        }
-
-        .stButton > button,
-        .stDownloadButton > button {
-            background: #ffffff !important;
-            color: var(--text) !important;
-            border: 1px solid var(--line-strong) !important;
-            border-radius: 10px !important;
-            font-weight: 600 !important;
-        }
-
-        .stButton > button:hover,
-        .stDownloadButton > button:hover {
-            border-color: var(--accent) !important;
-            color: var(--accent) !important;
-        }
-
-        [data-testid="stFileUploaderDropzone"] {
-            border: 1.5px dashed var(--line-strong) !important;
-            border-radius: 14px !important;
-            background: rgba(255, 255, 255, 0.7) !important;
-        }
-
-        .stAlert {
-            background: #ffffff !important;
-            color: var(--text) !important;
-            border: 1px solid var(--line) !important;
-        }
-
-        .hero-box, .info-box, .empty-box, .status-box {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 16px;
-            box-shadow: 0 8px 22px rgba(10, 30, 50, 0.06);
-        }
-
-        .hero-box {
-            padding: 1.2rem 1.4rem;
-            margin-bottom: 1rem;
-        }
-
-        .hero-box h1 {
-            margin: 0 0 0.35rem 0;
-            font-size: 1.9rem;
-            color: var(--accent);
-        }
-
-        .hero-box p {
-            margin: 0;
-            color: var(--muted);
-            font-size: 1rem;
-        }
-
-        .info-box {
-            padding: 1rem 1.1rem;
-            margin-bottom: 1rem;
-        }
-
-        .info-box h3 {
-            margin: 0 0 0.65rem 0;
-            color: var(--accent);
-            font-size: 1.05rem;
-        }
-
-        .info-box ul {
-            margin: 0;
-            padding-left: 1.1rem;
-        }
-
-        .info-box li {
-            margin: 0.35rem 0;
-            color: var(--muted);
-        }
-
-        .status-box {
-            padding: 0.9rem 1rem;
-            margin-bottom: 0.8rem;
-        }
-
-        .status-label {
-            display: block;
-            font-size: 0.82rem;
-            color: var(--muted);
-            margin-bottom: 0.15rem;
-        }
-
-        .status-value {
-            display: block;
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: var(--text);
-        }
-
-        .export-row {
-            margin: 0.25rem 0 1rem 0;
-        }
-
-        .print-note {
-            color: var(--muted);
-            font-size: 0.95rem;
-            margin: 0.3rem 0 0.9rem 0;
-        }
-
-        .empty-box {
-            padding: 1.2rem 1.3rem;
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        .empty-box h3 {
-            margin-top: 0;
-            color: var(--accent);
-        }
-
-        .empty-box p, .empty-box li {
-            color: var(--muted);
+        section[data-testid="stSidebar"] {
+            background: #f7f9fc;
+            border-right: 1px solid #d9e0e7;
         }
 
         .paper {
@@ -704,80 +444,63 @@ def app_css() -> str:
             max-width: var(--paper-width);
             min-height: var(--paper-min-height);
             margin: 0 auto 1.5rem auto;
-            background: var(--paper);
-            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+            background: white;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
             border-radius: 8px;
             padding: 12mm;
-            color: #1f1f1f;
-        }
-
-        .paper * {
-            color: #1f1f1f;
+            color: #222;
         }
 
         .paper-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            gap: 8mm;
-            margin-bottom: 6mm;
-            border-bottom: 1px solid #d7dde5;
-            padding-bottom: 4mm;
+            gap: 1rem;
+            margin-bottom: 8mm;
+            border-bottom: 1px solid #d8dde3;
+            padding-bottom: 5mm;
         }
 
         .paper-title {
+            font-size: 20pt;
+            font-weight: 700;
+            color: var(--accent);
             margin: 0;
-            font-size: 19pt;
-            color: #184b6b;
         }
 
         .paper-subtitle {
-            margin-top: 1.5mm;
-            font-size: 9.5pt;
-            color: #566372;
-        }
-
-        .header-facts {
-            font-size: 9.5pt;
-            text-align: right;
-            color: #3d4a57;
-            min-width: 55mm;
+            font-size: 10pt;
+            color: var(--muted);
+            margin-top: 2mm;
         }
 
         .meta-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 3.5mm 6mm;
-            margin-bottom: 6mm;
+            gap: 4mm 8mm;
+            margin-bottom: 8mm;
         }
 
         .meta-card {
-            border: 1px solid #dfe5eb;
+            border: 1px solid #e3e7ec;
             border-radius: 6px;
-            padding: 3mm 3.5mm;
-            background: #fafcfe;
+            padding: 3.5mm 4mm;
+            background: #fbfcfd;
         }
 
         .meta-label {
             display: block;
-            font-size: 8.4pt;
-            color: #667381;
+            font-size: 8.5pt;
+            color: var(--muted);
             text-transform: uppercase;
             letter-spacing: 0.04em;
-            margin-bottom: 0.8mm;
+            margin-bottom: 1mm;
         }
 
         .meta-value {
             display: block;
-            font-size: 10.5pt;
-            font-weight: 700;
-            color: #1f1f1f;
-        }
-
-        .section-title {
-            margin: 6mm 0 2mm 0;
-            font-size: 11.5pt;
-            color: #184b6b;
+            font-size: 11pt;
+            font-weight: 600;
         }
 
         .plan-table {
@@ -785,66 +508,19 @@ def app_css() -> str:
             border-collapse: collapse;
             border: 1.5px solid #aaa;
             font-size: 9pt;
-            margin-top: 2mm;
+            margin-top: 4mm;
         }
 
         .plan-table th,
         .plan-table td {
             border: 1px solid #aaa;
-            padding: 2.2mm 2mm;
+            padding: 2.5mm 2mm;
             text-align: left;
             vertical-align: top;
         }
 
         .plan-table th {
             background: #eef3f9;
-            font-weight: 700;
-        }
-
-        .cost-block {
-            border: 1px solid #dce3eb;
-            border-radius: 7px;
-            padding: 3.2mm 3.5mm;
-            margin-top: 3mm;
-            background: #fcfdff;
-            page-break-inside: avoid;
-        }
-
-        .cost-head {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 2mm 4mm;
-            margin-bottom: 2.5mm;
-            font-size: 8.8pt;
-        }
-
-        .cost-head strong {
-            color: #184b6b;
-        }
-
-        .cost-note {
-            font-size: 8.7pt;
-            color: #7a2f2f;
-            margin: 1.5mm 0 0 0;
-        }
-
-        .supplier-table {
-            width: 100%;
-            border-collapse: collapse;
-            border: 1px solid #b8c2cf;
-            font-size: 8.7pt;
-        }
-
-        .supplier-table th,
-        .supplier-table td {
-            border: 1px solid #b8c2cf;
-            padding: 1.8mm 1.7mm;
-            text-align: left;
-            vertical-align: top;
-        }
-
-        .supplier-table th {
-            background: #f0f5fa;
             font-weight: 700;
         }
 
@@ -855,7 +531,7 @@ def app_css() -> str:
             min-height: var(--paper-min-height);
             margin: 0 auto 1.5rem auto;
             background: white;
-            box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
             border-radius: 8px;
             padding: 18mm 14mm;
             display: flex;
@@ -868,97 +544,134 @@ def app_css() -> str:
 
         .cover-page h1,
         .separator-page h1 {
-            margin: 0 0 6mm 0;
+            margin: 0 0 8mm 0;
             font-size: 26pt;
-            color: #184b6b;
+            color: var(--accent);
         }
 
         .cover-page h2,
         .separator-page h2 {
             margin: 0 0 4mm 0;
-            font-size: 15pt;
-            color: #253342;
+            font-size: 16pt;
+            color: #2d3741;
         }
 
         .cover-page p,
         .separator-page p {
-            margin: 1mm 0;
-            font-size: 10.5pt;
-            color: #5b6876;
+            font-size: 11pt;
+            color: var(--muted);
+            margin: 1.5mm 0;
         }
 
         .print-toolbar {
             display: flex;
-            gap: 0.7rem;
+            gap: 0.75rem;
             flex-wrap: wrap;
-            margin-bottom: 0.6rem;
+            margin: 0 0 1rem 0;
+            justify-content: center;
         }
 
-        .export-search-shell {
-            max-width: 210mm;
-            margin: 0.9rem auto 1rem auto;
-            padding: 0;
+        .print-note {
+            color: #51606f;
+            font-size: 0.92rem;
+            text-align: center;
+            margin-bottom: 1rem;
         }
 
-        .export-searchbar {
-            display: flex;
-            gap: 0.8rem;
-            flex-wrap: wrap;
-            align-items: end;
-            background: #ffffff;
-            border: 1px solid #cfd8e3;
-            border-radius: 10px;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
-            padding: 0.9rem 1rem;
+        .export-search-toolbar {
+            width: 100%;
+            max-width: var(--paper-width);
+            margin: 0 auto 1rem auto;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+            border-radius: 8px;
+            padding: 14px 16px;
+            color: #1f2933;
         }
 
-        .export-search-field {
-            flex: 1 1 220px;
+        .export-search-title {
+            margin: 0 0 10px 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .export-search-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
         }
 
         .export-search-field label {
             display: block;
-            font-size: 0.84rem;
-            color: #526173;
-            margin-bottom: 0.25rem;
-            font-weight: 600;
+            font-size: 12px;
+            font-weight: 700;
+            color: #44515d;
+            margin-bottom: 6px;
         }
 
         .export-search-field input {
             width: 100%;
-            border: 1px solid #aab7c6;
-            border-radius: 8px;
-            padding: 0.62rem 0.75rem;
-            font-size: 0.97rem;
-            color: #16202a;
-            background: #ffffff;
             box-sizing: border-box;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 14px;
+            color: #111827;
+            background: #ffffff;
         }
 
         .export-search-actions {
             display: flex;
-            gap: 0.5rem;
+            flex-wrap: wrap;
             align-items: center;
+            gap: 12px;
+            margin-top: 12px;
         }
 
         .export-search-actions button {
-            border: 1px solid #8ea4b8;
-            background: #ffffff;
-            color: #16202a;
+            border: 1px solid #9fb4c8;
             border-radius: 8px;
-            padding: 0.62rem 0.9rem;
+            padding: 9px 14px;
+            background: #f8fbff;
+            color: #184b6b;
+            font-weight: 700;
             cursor: pointer;
-            font-weight: 600;
         }
 
-        .export-search-status {
-            margin-top: 0.45rem;
-            font-size: 0.9rem;
+        .export-search-actions button:hover {
+            background: #eef5fb;
+        }
+
+        .export-search-results {
+            font-size: 13px;
             color: #526173;
         }
 
-        .customer-export-group {
+        .export-empty-results {
+            display: none;
+            margin-top: 12px;
+            border: 1px solid #d7dde5;
+            border-radius: 8px;
+            padding: 12px;
+            background: #fafcfe;
+            color: #526173;
+        }
+
+        .customer-entry {
             display: block;
+        }
+
+        .empty-state {
+            width: 100%;
+            max-width: var(--paper-width);
+            margin: 0 auto;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            color: #5f6b76;
         }
 
         @page {
@@ -976,7 +689,8 @@ def app_css() -> str:
             .stDeployButton,
             .print-toolbar,
             .print-note,
-            .export-search-shell {
+            .export-search-toolbar,
+            .export-empty-results {
                 display: none !important;
                 visibility: hidden !important;
             }
@@ -1001,99 +715,31 @@ def app_css() -> str:
             }
 
             .paper:last-child,
-            .cover-page:last-child,
-            .separator-page:last-child {
-                page-break-after: auto !important;
-                break-after: auto !important;
+            .separator-page:last-child,
+            .cover-page:last-child {
+                page-break-after: auto;
+                break-after: auto;
             }
         }
     </style>
     """
 
 
-def render_status_box(label: str, value: str) -> str:
-    return f"""
-    <div class="status-box">
-        <span class="status-label">{html.escape(label)}</span>
-        <span class="status-value">{html.escape(value)}</span>
-    </div>
-    """
-
-
-def build_combined_plan_rows(customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> pd.DataFrame:
-    combined_rows: List[Dict[str, object]] = []
-
-    if not customer_rows.empty:
-        ordered = customer_rows.sort_values(
-            ["SortKey_Liefertag", "CSB Tournummer", "SortKey_Bestelltag", "SortKey_Sortiment", "Bestellzeitende"],
-            na_position="last",
-        )
-        for _, row in ordered.iterrows():
-            combined_rows.append(
-                {
-                    "Liefertag": normalize_text(row.get("Liefertag", "")),
-                    "CSB_Tour": normalize_text(row.get("CSB Tournummer", "")),
-                    "Eintrag": normalize_text(row.get("Sortiment", "")),
-                    "Bestelltag": normalize_text(row.get("Bestelltag_Name", "")),
-                    "Uhrzeit": normalize_text(row.get("Bestellzeitende", "")),
-                    "Vorlauf": "",
-                    "SortKey_Liefertag": row.get("SortKey_Liefertag", 99),
-                    "SortKey_CSB": pd.to_numeric(normalize_digits(row.get("CSB Tournummer", "")) or pd.NA, errors="coerce"),
-                    "SortKey_Bestelltag": row.get("SortKey_Bestelltag", 99),
-                    "SortKey_Eintrag": normalize_text(row.get("Sortiment", "")),
-                    "RowType": 0,
-                    "SupplierOrder": 0,
-                }
-            )
-
-    supplier_order = {name: idx for idx, name in enumerate(KOSTENPLAN_LIEFERANTEN.keys(), start=1)}
-    schedule_blocks = summarize_cost_schedules(customer_rows, df_kostenplan)
-    for block in schedule_blocks:
-        for item in block.get("supplier_rows", []):
-            combined_rows.append(
-                {
-                    "Liefertag": normalize_text(block.get("liefertag", "")),
-                    "CSB_Tour": normalize_text(block.get("csb_tour", "")),
-                    "Eintrag": normalize_text(item.get("lieferant", "")),
-                    "Bestelltag": normalize_text(item.get("bestelltag", "")),
-                    "Uhrzeit": normalize_text(item.get("zeit", "")),
-                    "Vorlauf": normalize_text(item.get("vorlauf", "")),
-                    "SortKey_Liefertag": {name: i for i, name in WOCHENTAGE.items()}.get(normalize_text(block.get("liefertag", "")), 99),
-                    "SortKey_CSB": pd.to_numeric(normalize_digits(block.get("csb_tour", "")) or pd.NA, errors="coerce"),
-                    "SortKey_Bestelltag": {value: key for key, value in WOCHENTAGE.items()}.get(normalize_text(item.get("bestelltag", "")), 99),
-                    "SortKey_Eintrag": normalize_text(item.get("lieferant", "")),
-                    "RowType": 1,
-                    "SupplierOrder": supplier_order.get(normalize_text(item.get("lieferant", "")), 99),
-                }
-            )
-
-    if not combined_rows:
-        return pd.DataFrame(columns=["Liefertag", "CSB_Tour", "Eintrag", "Bestelltag", "Uhrzeit", "Vorlauf"])
-
-    result = pd.DataFrame(combined_rows)
-    result = result.sort_values(
-        ["SortKey_Liefertag", "SortKey_CSB", "RowType", "SortKey_Bestelltag", "SupplierOrder", "SortKey_Eintrag", "Uhrzeit"],
-        na_position="last",
-    ).reset_index(drop=True)
-    return result
-
-
-def render_combined_plan_table(customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> str:
-    rows = build_combined_plan_rows(customer_rows, df_kostenplan)
+def render_plan_table(rows: pd.DataFrame) -> str:
     if rows.empty:
         return "<p>Keine Planzeilen vorhanden.</p>"
 
-    body_rows: List[str] = []
-    for _, row in rows.iterrows():
+    ordered = rows.sort_values(["SortKey_Bestelltag", "SortKey_Sortiment", "Bestellzeitende"])
+    body_rows = []
+
+    for _, row in ordered.iterrows():
         body_rows.append(
             f"""
             <tr>
                 <td>{html.escape(normalize_text(row.get('Liefertag', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('CSB_Tour', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Eintrag', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Bestelltag', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Uhrzeit', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Vorlauf', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('Sortiment', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('Bestelltag_Name', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('Bestellzeitende', '')))}</td>
             </tr>
             """
         )
@@ -1103,11 +749,9 @@ def render_combined_plan_table(customer_rows: pd.DataFrame, df_kostenplan: pd.Da
         <thead>
             <tr>
                 <th>Liefertag</th>
-                <th>CSB-Tour</th>
-                <th>Eintrag</th>
+                <th>Sortiment</th>
                 <th>Bestelltag</th>
-                <th>Uhrzeit</th>
-                <th>Vorlauf in Tagen</th>
+                <th>Bestellzeitende</th>
             </tr>
         </thead>
         <tbody>
@@ -1117,9 +761,7 @@ def render_combined_plan_table(customer_rows: pd.DataFrame, df_kostenplan: pd.Da
     """
 
 
-
-
-def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> str:
+def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> str:
     sap_nr = normalize_text(customer.get("SAP_Nr", ""))
     name = normalize_text(customer.get("Name", ""))
     address = normalize_text(customer.get("Strasse", ""))
@@ -1127,7 +769,19 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_ko
     category = normalize_text(customer.get("Kategorie", ""))
     csb_nr = normalize_text(customer.get("CSB_Nr", ""))
     fachberater = normalize_text(customer.get("Fachberater", ""))
-    csb_touren = sorted({normalize_text(v) for v in customer_rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist() if normalize_text(v)})
+    tourengruppe = normalize_text(customer.get("Tourengruppe", ""))
+    leiter = normalize_text(customer.get("Leiter", ""))
+
+    verladetor = ""
+    rahmentour = normalize_text(customer.get("Rahmentour_Raw", ""))
+
+    if not customer_rows.empty:
+        verladetor_series = customer_rows["Verladetor"].dropna().astype(str).str.strip()
+        rahmentour_series = customer_rows["Rahmentour_Raw"].dropna().astype(str).str.strip()
+        if not verladetor_series.empty:
+            verladetor = normalize_text(verladetor_series.iloc[0])
+        if not rahmentour_series.empty:
+            rahmentour = normalize_text(rahmentour_series.iloc[0])
 
     return f"""
     <div class="paper">
@@ -1136,9 +790,10 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_ko
                 <h1 class="paper-title">Sendeplan</h1>
                 <div class="paper-subtitle">Generiert am {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr</div>
             </div>
-            <div class="header-facts">
+            <div style="text-align:right; font-size:10pt; color:#5f6b76;">
                 <div><strong>Kategorie:</strong> {html.escape(category)}</div>
-                <div><strong>CSB-Touren:</strong> {html.escape(', '.join(csb_touren) or '-')}</div>
+                <div><strong>Rahmentour:</strong> {html.escape(rahmentour)}</div>
+                <div><strong>Verladetor:</strong> {html.escape(verladetor)}</div>
             </div>
         </div>
 
@@ -1148,11 +803,12 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_ko
             <div class="meta-card"><span class="meta-label">Kunde</span><span class="meta-value">{html.escape(name)}</span></div>
             <div class="meta-card"><span class="meta-label">Fachberater</span><span class="meta-value">{html.escape(fachberater)}</span></div>
             <div class="meta-card"><span class="meta-label">Adresse</span><span class="meta-value">{html.escape(address)}</span></div>
-            <div class="meta-card"><span class="meta-label">Postleitzahl / Ort</span><span class="meta-value">{html.escape(plz_ort)}</span></div>
+            <div class="meta-card"><span class="meta-label">PLZ / Ort</span><span class="meta-value">{html.escape(plz_ort)}</span></div>
+            <div class="meta-card"><span class="meta-label">Tourengruppe</span><span class="meta-value">{html.escape(tourengruppe)}</span></div>
+            <div class="meta-card"><span class="meta-label">Leiter</span><span class="meta-value">{html.escape(leiter)}</span></div>
         </div>
 
-        <h3 class="section-title">Planliste mit Sortimenten und CSB-Zeiten</h3>
-        {render_combined_plan_table(customer_rows, df_kostenplan)}
+        {render_plan_table(customer_rows)}
     </div>
     """
 
@@ -1180,103 +836,121 @@ def render_separator_page(customer: pd.Series) -> str:
     """
 
 
-def build_export_search_toolbar() -> str:
+def render_export_search_toolbar() -> str:
     return """
-    <div class="export-search-shell">
-        <div class="export-searchbar">
+    <div class="export-search-toolbar">
+        <div class="export-search-title">Suche im exportierten Sendeplan</div>
+        <div class="export-search-grid">
             <div class="export-search-field">
-                <label for="sapSearch">SAP-Nummer</label>
-                <input id="sapSearch" type="text" placeholder="Zum Beispiel 211393" oninput="filterExportDocs()" />
+                <label for="search-sap">SAP-Nummer</label>
+                <input id="search-sap" type="text" placeholder="zum Beispiel 211393" />
             </div>
             <div class="export-search-field">
-                <label for="csbSearch">CSB-Nummer oder CSB-Tour</label>
-                <input id="csbSearch" type="text" placeholder="Zum Beispiel 13938 oder 1064" oninput="filterExportDocs()" />
-            </div>
-            <div class="export-search-actions">
-                <button type="button" onclick="resetExportFilter()">Zurücksetzen</button>
+                <label for="search-csb">CSB-Nummer oder CSB-Tour</label>
+                <input id="search-csb" type="text" placeholder="zum Beispiel 2881 oder 22221" />
             </div>
         </div>
-        <div id="exportSearchStatus" class="export-search-status"></div>
+        <div class="export-search-actions">
+            <button type="button" onclick="resetExportSearch()">Suche zurücksetzen</button>
+            <div id="export-search-results" class="export-search-results"></div>
+        </div>
+        <div id="export-empty-results" class="export-empty-results">
+            Keine Treffer für die aktuelle SAP- oder CSB-Suche.
+        </div>
     </div>
-    <script>
-        function normalizeSearchText(value) {
-            return (value || '').toString().toLowerCase().replace(/\\s+/g, ' ').trim();
-        }
-
-        function filterExportDocs() {
-            const sapNeedle = normalizeSearchText(document.getElementById('sapSearch')?.value || '');
-            const csbNeedle = normalizeSearchText(document.getElementById('csbSearch')?.value || '');
-            const groups = Array.from(document.querySelectorAll('.customer-export-group'));
-            let visible = 0;
-
-            groups.forEach((group) => {
-                const sapHaystack = normalizeSearchText(group.getAttribute('data-sap-search') || '');
-                const csbHaystack = normalizeSearchText(group.getAttribute('data-csb-search') || '');
-                const sapMatch = !sapNeedle || sapHaystack.includes(sapNeedle);
-                const csbMatch = !csbNeedle || csbHaystack.includes(csbNeedle);
-                const show = sapMatch && csbMatch;
-                group.style.display = show ? 'block' : 'none';
-                if (show) {
-                    visible += 1;
-                }
-            });
-
-            const status = document.getElementById('exportSearchStatus');
-            if (!status) {
-                return;
-            }
-
-            if (!sapNeedle && !csbNeedle) {
-                status.textContent = `${visible} Kunden sichtbar`;
-                return;
-            }
-            status.textContent = `${visible} Kunden passend zum Suchfilter`;
-        }
-
-        function resetExportFilter() {
-            const sap = document.getElementById('sapSearch');
-            const csb = document.getElementById('csbSearch');
-            if (sap) sap.value = '';
-            if (csb) csb.value = '';
-            filterExportDocs();
-        }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            filterExportDocs();
-        });
-    </script>
     """
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, df_kostenplan: pd.DataFrame, include_separators: bool = True) -> str:
+
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True) -> str:
     docs: List[str] = [
-        build_export_search_toolbar(),
         render_cover_page(
             title="Sendeplan-Generator",
             subtitle="Gesamtplan",
             lines=[
                 f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr",
                 f"Kundenanzahl: {len(customers)}",
-                "Die HTML-Datei ist nach SAP-Nummer sowie CSB-Nummer oder CSB-Tour filterbar.",
+                "Diese HTML-Datei ist vollständig eigenständig und direkt im Browser durchsuchbar.",
             ],
         )
     ]
 
+    entry_count = 0
     for _, customer in customers.iterrows():
-        customer_rows = plan_rows[plan_rows["SAP_Nr"] == customer["SAP_Nr"]].copy()
-        csb_touren = sorted({normalize_text(v) for v in customer_rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist() if normalize_text(v)})
-        csb_search = " ".join(filter(None, [normalize_text(customer.get("CSB_Nr", "")), " ".join(csb_touren)]))
-        group_parts: List[str] = []
+        rows = plan_rows[plan_rows["SAP_Nr"] == customer["SAP_Nr"]].copy()
+        sap = normalize_text(customer.get("SAP_Nr", ""))
+        csb_nr = normalize_text(customer.get("CSB_Nr", ""))
+        csb_touren = sorted({
+            normalize_text(value)
+            for value in rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist()
+            if normalize_text(value)
+        })
+        search_blob = " ".join(
+            part for part in [sap, csb_nr, " ".join(csb_touren), normalize_text(customer.get("Name", ""))]
+            if part
+        ).lower()
+
+        entry_parts: List[str] = []
         if include_separators:
-            group_parts.append(render_separator_page(customer))
-        group_parts.append(render_customer_plan(customer, customer_rows, df_kostenplan))
+            entry_parts.append(render_separator_page(customer))
+        entry_parts.append(render_customer_plan(customer, rows))
+
+        csb_search = " ".join([part for part in [csb_nr, *csb_touren] if part]).lower()
         docs.append(
-            f"""
-            <section class="customer-export-group" data-sap-search="{html.escape(normalize_text(customer.get('SAP_Nr', '')))}" data-csb-search="{html.escape(csb_search)}">
-                {''.join(group_parts)}
-            </section>
-            """
+            (
+                f'<section class="customer-entry" '
+                f'data-sap="{html.escape(sap.lower())}" '
+                f'data-csb="{html.escape(csb_search)}" '
+                f'data-search="{html.escape(search_blob)}">'
+                f'{"".join(entry_parts)}'
+                f'</section>'
+            )
         )
+        entry_count += 1
+
+    search_script = f"""
+    <script>
+        function normalizeSearchValue(value) {{
+            return (value || '').toLowerCase().trim();
+        }}
+
+        function applyExportSearch() {{
+            const sapValue = normalizeSearchValue(document.getElementById('search-sap').value);
+            const csbValue = normalizeSearchValue(document.getElementById('search-csb').value);
+            const entries = Array.from(document.querySelectorAll('.customer-entry'));
+            let visibleCount = 0;
+
+            entries.forEach((entry) => {{
+                const sap = normalizeSearchValue(entry.getAttribute('data-sap'));
+                const csb = normalizeSearchValue(entry.getAttribute('data-csb'));
+                const sapOk = !sapValue || sap.includes(sapValue);
+                const csbOk = !csbValue || csb.includes(csbValue);
+                const show = sapOk && csbOk;
+                entry.style.display = show ? '' : 'none';
+                if (show) {{
+                    visibleCount += 1;
+                }}
+            }});
+
+            const resultLabel = document.getElementById('export-search-results');
+            const emptyState = document.getElementById('export-empty-results');
+            resultLabel.textContent = `Treffer: ${{visibleCount}} / {entry_count}`;
+            emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
+        }}
+
+        function resetExportSearch() {{
+            document.getElementById('search-sap').value = '';
+            document.getElementById('search-csb').value = '';
+            applyExportSearch();
+        }}
+
+        document.addEventListener('DOMContentLoaded', function () {{
+            document.getElementById('search-sap').addEventListener('input', applyExportSearch);
+            document.getElementById('search-csb').addEventListener('input', applyExportSearch);
+            applyExportSearch();
+        }});
+    </script>
+    """
 
     return f"""
     <!DOCTYPE html>
@@ -1288,13 +962,15 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, d
         {app_css()}
     </head>
     <body>
+        {render_export_search_toolbar()}
         {''.join(docs)}
+        {search_script}
     </body>
     </html>
     """
 
 
-def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> str:
+def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame) -> str:
     return f"""
     <!DOCTYPE html>
     <html lang="de">
@@ -1305,38 +981,36 @@ def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame,
         {app_css()}
     </head>
     <body>
-        {render_customer_plan(customer, customer_rows, df_kostenplan)}
+        {render_customer_plan(customer, customer_rows)}
     </body>
     </html>
     """
 
 
 def render_print_buttons(single_html: str, bulk_html: str) -> None:
-    payload = {
-        "single": single_html,
-        "bulk": bulk_html,
-    }
+    single_html_json = json.dumps(single_html)
+    bulk_html_json = json.dumps(bulk_html)
+
     components.html(
         f"""
         <div class="print-toolbar">
-            <button onclick="openAndPrint('single')">Aktuellen Kunden drucken</button>
-            <button onclick="openAndPrint('bulk')">Gefilterten Gesamtplan drucken</button>
+            <button onclick='printDocument({single_html_json})'
+                    style="padding:10px 16px; border:none; border-radius:8px; background:#1f4e79; color:white; font-weight:600; cursor:pointer;">
+                Einzeldruck
+            </button>
+            <button onclick='printDocument({bulk_html_json})'
+                    style="padding:10px 16px; border:none; border-radius:8px; background:#2a7f62; color:white; font-weight:600; cursor:pointer;">
+                Alle drucken
+            </button>
         </div>
         <script>
-            const docs = {json.dumps(payload)};
-            function openAndPrint(kind) {{
-                const win = window.open('', '_blank');
-                if (!win) {{
-                    alert('Der Browser hat das Druckfenster blockiert.');
-                    return;
-                }}
-                win.document.open();
-                win.document.write(docs[kind]);
-                win.document.close();
-                win.focus();
-                win.onload = function() {{
-                    win.print();
-                }};
+            function printDocument(fullHtml) {{
+                const w = window.open('', '_blank');
+                w.document.open();
+                w.document.write(fullHtml);
+                w.document.close();
+                w.focus();
+                setTimeout(() => w.print(), 250);
             }}
         </script>
         """,
@@ -1344,19 +1018,7 @@ def render_print_buttons(single_html: str, bulk_html: str) -> None:
     )
 
 
-def ensure_session_state() -> None:
-    if "category_filter" not in st.session_state:
-        st.session_state.category_filter = "Alle"
-    if "selected_sap" not in st.session_state:
-        st.session_state.selected_sap = ""
-    if "show_only_with_plan_rows" not in st.session_state:
-        st.session_state.show_only_with_plan_rows = True
-
-
-def set_category(category: str) -> None:
-    st.session_state.category_filter = category
-
-
+@st.cache_data(show_spinner=False)
 def build_option_labels(df_customers: pd.DataFrame) -> Dict[str, str]:
     return {
         row["SAP_Nr"]: f"{row['SAP_Nr']} | {row['Name']} | {row['Ort']}"
@@ -1364,92 +1026,97 @@ def build_option_labels(df_customers: pd.DataFrame) -> Dict[str, str]:
     }
 
 
-def all_required_uploads_present(upload_map: Dict[str, object]) -> bool:
+def init_session_state() -> None:
+    if "category_filter" not in st.session_state:
+        st.session_state.category_filter = "Alle"
+    if "selected_sap" not in st.session_state:
+        st.session_state.selected_sap = ""
+
+
+def set_category(category: str) -> None:
+    st.session_state.category_filter = category
+
+
+def all_required_uploads_present(upload_map: Dict[str, Optional[st.runtime.uploaded_file_manager.UploadedFile]]) -> bool:
     return all(upload_map.values())
 
 
-def file_uploader_block() -> Dict[str, object]:
-    st.sidebar.subheader("Datei-Uploads")
-    kunden_file = st.sidebar.file_uploader("Kundenliste", type=["xlsx", "xls", "xlsm"], key="kunden_file")
-    sap_file = st.sidebar.file_uploader("SAP-Datei", type=["xlsx", "xls", "xlsm"], key="sap_file")
-    transport_file = st.sidebar.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm"], key="transport_file")
-    kisoft_file = st.sidebar.file_uploader("Kisoft", type=["csv"], key="kisoft_file")
-    kostenplan_file = st.sidebar.file_uploader("Kostenstellenplan", type=["xlsx", "xls", "xlsm"], key="kostenplan_file")
-
-    separator = st.sidebar.selectbox("CSV-Trennzeichen für Kisoft", options=[";", ","], index=0)
-    return {
-        "kunden": kunden_file,
-        "sap": sap_file,
-        "transport": transport_file,
-        "kisoft": kisoft_file,
-        "kostenplan": kostenplan_file,
-        "separator": separator,
-    }
-
-
 def main() -> None:
-    ensure_session_state()
+    init_session_state()
     st.markdown(app_css(), unsafe_allow_html=True)
 
-    st.markdown(
-        """
-        <div class="hero-box">
-            <h1>Sendeplan-Generator</h1>
-            <p>Lädt deine Quelldateien hoch, erzeugt den Plan je Kunde und bietet Druck sowie HTML-Export mit A4-Layout an.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.title("📦 Sendeplan-Generator")
+    st.caption("Dateien hochladen, Sendeplan erzeugen und HTML zum Download bereitstellen.")
 
-    upload_data = file_uploader_block()
-    upload_map = {key: upload_data[key] for key in ["kunden", "sap", "transport", "kisoft", "kostenplan"]}
+    with st.sidebar:
+        st.header("Quelldateien")
+        csv_separator = st.text_input("CSV-Trennzeichen", value=";", max_chars=1)
 
-    if not all_required_uploads_present(upload_map):
-        st.markdown(
-            """
-            <div class="info-box">
-                <h3>Was jetzt benötigt wird</h3>
-                <ul>
-                    <li>Kundenliste mit fester Zuordnung der Spalten A, I, J, K, L, M, N</li>
-                    <li>SAP-Datei mit den festen Spalten A, H, I, O, Y</li>
-                    <li>Transportgruppen mit den Spalten A und C</li>
-                    <li>Kisoft als CSV mit SAP Rahmentour, CSB Tournummer, Wochentag und Verladetor</li>
-                    <li>Kostenstellenplan aus dem Blatt CSB Standard</li>
-                </ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        kunden_file = st.file_uploader(
+            "Kundenliste",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Feste Spalten: A, I, J, K, L, M, N",
         )
-        return
+        sap_file = st.file_uploader(
+            "SAP-Datei",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Feste Spalten: A, H, I, O, Y",
+        )
+        transport_file = st.file_uploader(
+            "Transportgruppen",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Feste Spalten: A, C",
+        )
+        kisoft_file = st.file_uploader(
+            "Kisoft-Datei",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            help="Benötigte Felder: SAP Rahmentour, CSB Tournummer, Verladetor",
+        )
+        kostenstellen_file = st.file_uploader(
+            "Kostenstellen-Datei",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Benötigte Felder: sap_von, sap_bis, tourengruppe, leiter",
+        )
 
-    kunden_file = upload_data["kunden"]
-    sap_file = upload_data["sap"]
-    transport_file = upload_data["transport"]
-    kisoft_file = upload_data["kisoft"]
-    kostenplan_file = upload_data["kostenplan"]
-    csv_separator = upload_data["separator"]
+        upload_map = {
+            "kunden": kunden_file,
+            "sap": sap_file,
+            "transport": transport_file,
+            "kisoft": kisoft_file,
+            "kostenstellen": kostenstellen_file,
+        }
 
-    kunden_sheet = UPLOAD_SPECS["kunden"]["sheet_default"]
-    sap_sheet = UPLOAD_SPECS["sap"]["sheet_default"]
-    transport_sheet = UPLOAD_SPECS["transport"]["sheet_default"]
-    kostenplan_sheet = "CSB Standard"
+        if not all_required_uploads_present(upload_map):
+            st.info("Bitte alle fünf Quelldateien hochladen. Danach werden Vorschau, Druck und HTML-Download freigeschaltet.")
+            st.markdown("**Verwendete Regeln**")
+            st.markdown(
+                """
+                - Kundenliste über feste Spalten **A, I, J, K, L, M, N**
+                - SAP über feste Spalten **A, H, I, O, Y**
+                - Transportgruppen über feste Spalten **A, C**
+                - Kisoft über **SAP Rahmentour**, **CSB Tournummer**, **Verladetor**
+                - Kostenstellen über **sap_von**, **sap_bis**, **tourengruppe**, **leiter**
+                """
+            )
+            st.stop()
 
     try:
-        customers_df, plan_rows_df, kostenplan_df = prepare_dataframes(
+        customers_df, plan_rows_df, counts = prepare_dataframes(
             kunden_file.getvalue(),
+            kunden_file.name,
             sap_file.getvalue(),
+            sap_file.name,
             transport_file.getvalue(),
+            transport_file.name,
             kisoft_file.getvalue(),
-            kostenplan_file.getvalue(),
-            csv_separator,
-            kunden_sheet,
-            sap_sheet,
-            transport_sheet,
-            kostenplan_sheet,
+            kisoft_file.name,
+            kostenstellen_file.getvalue(),
+            kostenstellen_file.name,
+            csv_separator or ";",
         )
     except Exception as exc:
         st.error(f"Die hochgeladenen Dateien konnten nicht verarbeitet werden: {exc}")
-        return
+        st.stop()
 
     with st.sidebar:
         st.divider()
@@ -1457,128 +1124,113 @@ def main() -> None:
         st.text_input(
             "Suche nach SAP-Nummer oder Name",
             key="search_text",
-            placeholder="Zum Beispiel 213109 oder Adler",
+            placeholder="z. B. 1001 oder Musterkunde",
         )
-        st.checkbox("Nur Kunden mit Planzeilen anzeigen", key="show_only_with_plan_rows")
 
-        category_counts = {}
-        for category in KATEGORIEN:
-            category_counts[category] = len(
-                filter_customers(
-                    customers_df,
-                    category,
-                    st.session_state.get("search_text", ""),
-                    st.session_state.show_only_with_plan_rows,
-                )
-            )
-
+        st.markdown("**Bereiche**")
         col1, col2 = st.columns(2)
         with col1:
-            st.button(f"Alle ({category_counts['Alle']})", use_container_width=True, on_click=set_category, args=("Alle",))
-            st.button(f"Malchow ({category_counts['Malchow']})", use_container_width=True, on_click=set_category, args=("Malchow",))
-            st.button(f"MK ({category_counts['MK']})", use_container_width=True, on_click=set_category, args=("MK",))
+            st.button(f"Alle ({counts['Alle']})", use_container_width=True, on_click=set_category, args=("Alle",))
+            st.button(f"Malchow ({counts['Malchow']})", use_container_width=True, on_click=set_category, args=("Malchow",))
+            st.button(f"MK ({counts['MK']})", use_container_width=True, on_click=set_category, args=("MK",))
         with col2:
-            st.button(f"NMS ({category_counts['NMS']})", use_container_width=True, on_click=set_category, args=("NMS",))
-            st.button(f"Direkt ({category_counts['Direkt']})", use_container_width=True, on_click=set_category, args=("Direkt",))
+            st.button(f"NMS ({counts['NMS']})", use_container_width=True, on_click=set_category, args=("NMS",))
+            st.button(f"Direkt ({counts['Direkt']})", use_container_width=True, on_click=set_category, args=("Direkt",))
 
-        st.caption(f"Aktiver Filter: {st.session_state.category_filter}")
+        st.info(f"Aktiver Filter: **{st.session_state.category_filter}**")
 
-    filtered_customers = filter_customers(
-        customers_df,
-        st.session_state.category_filter,
-        st.session_state.get("search_text", ""),
-        st.session_state.show_only_with_plan_rows,
-    )
+        filtered_customers = filter_customers(
+            customers_df,
+            st.session_state.category_filter,
+            st.session_state.get("search_text", ""),
+        )
+
+        st.markdown(f"**Treffer:** {len(filtered_customers)}")
+
+        option_labels = build_option_labels(filtered_customers)
+        options = filtered_customers["SAP_Nr"].tolist()
+
+        if options:
+            if st.session_state.selected_sap not in options:
+                st.session_state.selected_sap = options[0]
+
+            selected_sap = st.selectbox(
+                "Kunde auswählen",
+                options=options,
+                format_func=lambda sap: option_labels.get(sap, sap),
+                index=options.index(st.session_state.selected_sap) if st.session_state.selected_sap in options else 0,
+            )
+            st.session_state.selected_sap = selected_sap
+        else:
+            st.session_state.selected_sap = ""
+
+        st.divider()
+        st.subheader("HTML-Export")
+        export_html = build_full_document_html(filtered_customers, plan_rows_df, include_separators=True)
+        filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
+
+        st.download_button(
+            label="Standalone-HTML mit Suche herunterladen",
+            data=export_html,
+            file_name=f"sendeplan_{filename_suffix}.html",
+            mime="text/html",
+            use_container_width=True,
+        )
 
     main_col, info_col = st.columns([5, 2], gap="large")
 
     with info_col:
-        st.markdown(render_status_box("Kunden gesamt", str(len(customers_df))), unsafe_allow_html=True)
-        st.markdown(render_status_box("Planzeilen gesamt", str(len(plan_rows_df))), unsafe_allow_html=True)
-        st.markdown(render_status_box("Kunden im Filter", str(len(filtered_customers))), unsafe_allow_html=True)
+        st.subheader("Datenstatus")
+        st.metric("Kunden", len(customers_df))
+        st.metric("Planzeilen", len(plan_rows_df))
+        st.metric("Treffer im Filter", len(filtered_customers))
 
+        st.markdown("### Uploads")
         st.markdown(
             f"""
-            <div class="info-box">
-                <h3>Aktive Dateien</h3>
-                <ul>
-                    <li>Kundenliste: {html.escape(kunden_file.name)}</li>
-                    <li>SAP: {html.escape(sap_file.name)}</li>
-                    <li>Transportgruppen: {html.escape(transport_file.name)}</li>
-                    <li>Kisoft: {html.escape(kisoft_file.name)}</li>
-                    <li>Kostenstellenplan: {html.escape(kostenplan_file.name)}</li>
-                </ul>
-            </div>
-            <div class="info-box">
-                <h3>Zusätzliche Regeln</h3>
-                <ul>
-                    <li>Doppelte SAP-Zeilen werden je SAP-Nummer, Bestelltag und Liefertyp bereinigt.</li>
-                    <li>Die CSB-Daten werden direkt in die Hauptliste eingebaut und nicht als eigener Block ausgegeben.</li>
-                    <li>AVO, Werbemittel-Sonder, Werbemittel und Hamburger Jungs erscheinen als eigene Listenzeilen mit Zeit, Vorlauf und Bestelltag.</li>
-                </ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
+            - Kundenliste: **{kunden_file.name}**
+            - SAP: **{sap_file.name}**
+            - Transport: **{transport_file.name}**
+            - Kisoft: **{kisoft_file.name}**
+            - Kostenstellen: **{kostenstellen_file.name}**
+            """
+        )
+
+        st.markdown("### Mapping-Regeln")
+        st.markdown(
+            """
+            - **Kunden**: J = SAP, I = CSB, K = Name, L = Straße, M = PLZ, N = Ort, A = Fachberater
+            - **SAP**: A = SAP, O = Liefertyp, I = Bestellzeitende, H = Bestelltag, Y = Rahmentour
+            - **Transport**: A = Liefertyp-ID, C = Klartext für Sortiment
+            - **Kisoft**: `00 + erste 8 Stellen von Rahmentour_Raw` → `SAP Rahmentour`
+            - **Kostenstellen**: Range-Lookup über SAP-Bereiche
+            """
         )
 
     with main_col:
-        if filtered_customers.empty:
+        if not filtered_customers.empty and st.session_state.selected_sap:
+            selected_customer = filtered_customers[filtered_customers["SAP_Nr"] == st.session_state.selected_sap].iloc[0]
+            customer_rows = plan_rows_df[plan_rows_df["SAP_Nr"] == st.session_state.selected_sap].copy()
+
+            single_html = build_single_document_html(selected_customer, customer_rows)
+            bulk_html = build_full_document_html(filtered_customers, plan_rows_df, include_separators=True)
+
+            st.markdown(
+                "<div class='print-note'>Einzeldruck und Massendruck öffnen ein separates HTML-Dokument mit A4-Layout und starten dort den Browser-Druck.</div>",
+                unsafe_allow_html=True,
+            )
+            render_print_buttons(single_html, bulk_html)
+            st.markdown(render_customer_plan(selected_customer, customer_rows), unsafe_allow_html=True)
+        else:
             st.markdown(
                 """
-                <div class="empty-box">
+                <div class="empty-state">
                     <h3>Keine Kunden im aktuellen Filter</h3>
-                    <p>Bitte Suchbegriff, Kategorie oder die Einstellung für Kunden ohne Planzeilen anpassen.</p>
+                    <p>Bitte Suchbegriff oder Kategorie anpassen.</p>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
-            return
-
-        options = filtered_customers["SAP_Nr"].tolist()
-        option_labels = build_option_labels(filtered_customers)
-
-        if st.session_state.selected_sap not in options:
-            st.session_state.selected_sap = options[0]
-
-        selected_sap = st.selectbox(
-            "Kunde auswählen",
-            options=options,
-            format_func=lambda sap: option_labels.get(sap, sap),
-            index=options.index(st.session_state.selected_sap) if st.session_state.selected_sap in options else 0,
-        )
-        st.session_state.selected_sap = selected_sap
-
-        selected_customer = filtered_customers[filtered_customers["SAP_Nr"] == selected_sap].iloc[0]
-        customer_rows = plan_rows_df[plan_rows_df["SAP_Nr"] == selected_sap].copy()
-
-        single_html = build_single_document_html(selected_customer, customer_rows, kostenplan_df)
-        bulk_html = build_full_document_html(filtered_customers, plan_rows_df, kostenplan_df, include_separators=True)
-
-        export_col1, export_col2 = st.columns(2)
-        with export_col1:
-            st.download_button(
-                "Aktuellen Kunden als HTML herunterladen",
-                data=single_html,
-                file_name=f"sendeplan_{normalize_text(selected_customer['SAP_Nr'])}.html",
-                mime="text/html",
-                use_container_width=True,
-            )
-        with export_col2:
-            st.download_button(
-                "Gefilterten Gesamtplan als HTML herunterladen",
-                data=bulk_html,
-                file_name=f"sendeplan_{normalize_text(st.session_state.category_filter).lower() or 'alle'}.html",
-                mime="text/html",
-                use_container_width=True,
-            )
-
-        st.markdown(
-            "<p class='print-note'>Druck öffnet ein separates HTML-Dokument mit A4-Layout. Der Download speichert dieselbe HTML-Datei lokal.</p>",
-            unsafe_allow_html=True,
-        )
-        render_print_buttons(single_html, bulk_html)
-
-        st.markdown(render_customer_plan(selected_customer, customer_rows, kostenplan_df), unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
