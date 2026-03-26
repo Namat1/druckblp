@@ -952,21 +952,80 @@ def render_status_box(label: str, value: str) -> str:
     """
 
 
-def render_plan_table(rows: pd.DataFrame) -> str:
+def build_combined_plan_rows(customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> pd.DataFrame:
+    combined_rows: List[Dict[str, object]] = []
+
+    if not customer_rows.empty:
+        ordered = customer_rows.sort_values(
+            ["SortKey_Liefertag", "CSB Tournummer", "SortKey_Bestelltag", "SortKey_Sortiment", "Bestellzeitende"],
+            na_position="last",
+        )
+        for _, row in ordered.iterrows():
+            combined_rows.append(
+                {
+                    "Liefertag": normalize_text(row.get("Liefertag", "")),
+                    "CSB_Tour": normalize_text(row.get("CSB Tournummer", "")),
+                    "Eintrag": normalize_text(row.get("Sortiment", "")),
+                    "Bestelltag": normalize_text(row.get("Bestelltag_Name", "")),
+                    "Uhrzeit": normalize_text(row.get("Bestellzeitende", "")),
+                    "Vorlauf": "",
+                    "SortKey_Liefertag": row.get("SortKey_Liefertag", 99),
+                    "SortKey_CSB": pd.to_numeric(normalize_digits(row.get("CSB Tournummer", "")) or pd.NA, errors="coerce"),
+                    "SortKey_Bestelltag": row.get("SortKey_Bestelltag", 99),
+                    "SortKey_Eintrag": normalize_text(row.get("Sortiment", "")),
+                    "RowType": 0,
+                    "SupplierOrder": 0,
+                }
+            )
+
+    supplier_order = {name: idx for idx, name in enumerate(KOSTENPLAN_LIEFERANTEN.keys(), start=1)}
+    schedule_blocks = summarize_cost_schedules(customer_rows, df_kostenplan)
+    for block in schedule_blocks:
+        for item in block.get("supplier_rows", []):
+            combined_rows.append(
+                {
+                    "Liefertag": normalize_text(block.get("liefertag", "")),
+                    "CSB_Tour": normalize_text(block.get("csb_tour", "")),
+                    "Eintrag": normalize_text(item.get("lieferant", "")),
+                    "Bestelltag": normalize_text(item.get("bestelltag", "")),
+                    "Uhrzeit": normalize_text(item.get("zeit", "")),
+                    "Vorlauf": normalize_text(item.get("vorlauf", "")),
+                    "SortKey_Liefertag": {name: i for i, name in WOCHENTAGE.items()}.get(normalize_text(block.get("liefertag", "")), 99),
+                    "SortKey_CSB": pd.to_numeric(normalize_digits(block.get("csb_tour", "")) or pd.NA, errors="coerce"),
+                    "SortKey_Bestelltag": {value: key for key, value in WOCHENTAGE.items()}.get(normalize_text(item.get("bestelltag", "")), 99),
+                    "SortKey_Eintrag": normalize_text(item.get("lieferant", "")),
+                    "RowType": 1,
+                    "SupplierOrder": supplier_order.get(normalize_text(item.get("lieferant", "")), 99),
+                }
+            )
+
+    if not combined_rows:
+        return pd.DataFrame(columns=["Liefertag", "CSB_Tour", "Eintrag", "Bestelltag", "Uhrzeit", "Vorlauf"])
+
+    result = pd.DataFrame(combined_rows)
+    result = result.sort_values(
+        ["SortKey_Liefertag", "SortKey_CSB", "RowType", "SortKey_Bestelltag", "SupplierOrder", "SortKey_Eintrag", "Uhrzeit"],
+        na_position="last",
+    ).reset_index(drop=True)
+    return result
+
+
+def render_combined_plan_table(customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> str:
+    rows = build_combined_plan_rows(customer_rows, df_kostenplan)
     if rows.empty:
         return "<p>Keine Planzeilen vorhanden.</p>"
 
-    ordered = rows.sort_values(["SortKey_Liefertag", "SortKey_Bestelltag", "SortKey_Sortiment", "Bestellzeitende"])
     body_rows: List[str] = []
-
-    for _, row in ordered.iterrows():
+    for _, row in rows.iterrows():
         body_rows.append(
             f"""
             <tr>
                 <td>{html.escape(normalize_text(row.get('Liefertag', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Sortiment', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Bestelltag_Name', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Bestellzeitende', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('CSB_Tour', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('Eintrag', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('Bestelltag', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('Uhrzeit', '')))}</td>
+                <td>{html.escape(normalize_text(row.get('Vorlauf', '')))}</td>
             </tr>
             """
         )
@@ -976,9 +1035,11 @@ def render_plan_table(rows: pd.DataFrame) -> str:
         <thead>
             <tr>
                 <th>Liefertag</th>
-                <th>Sortiment</th>
+                <th>CSB-Tour</th>
+                <th>Eintrag</th>
                 <th>Bestelltag</th>
-                <th>Bestellzeitende</th>
+                <th>Uhrzeit</th>
+                <th>Vorlauf in Tagen</th>
             </tr>
         </thead>
         <tbody>
@@ -988,65 +1049,6 @@ def render_plan_table(rows: pd.DataFrame) -> str:
     """
 
 
-def render_cost_schedule_blocks(schedule_blocks: List[Dict[str, object]]) -> str:
-    if not schedule_blocks:
-        return "<p>Keine Zusatzdaten aus dem Kostenstellenplan vorhanden.</p>"
-
-    blocks: List[str] = []
-    for block in schedule_blocks:
-        supplier_rows = block.get("supplier_rows", [])
-        if supplier_rows:
-            rows_html = "".join(
-                f"""
-                <tr>
-                    <td>{html.escape(normalize_text(item.get('lieferant', '')))}</td>
-                    <td>{html.escape(normalize_text(item.get('zeit', '')))}</td>
-                    <td>{html.escape(normalize_text(item.get('vorlauf', '')))}</td>
-                    <td>{html.escape(normalize_text(item.get('bestelltag', '')))}</td>
-                </tr>
-                """
-                for item in supplier_rows
-            )
-            supplier_table = f"""
-            <table class="supplier-table">
-                <thead>
-                    <tr>
-                        <th>Bereich</th>
-                        <th>Zeit</th>
-                        <th>Vorlauf in Tagen</th>
-                        <th>Bestelltag</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {rows_html}
-                </tbody>
-            </table>
-            """
-        else:
-            supplier_table = ""
-
-        hint_html = ""
-        if block.get("hinweis"):
-            hint_html = f"<p class='cost-note'>{html.escape(normalize_text(block.get('hinweis', '')))}</p>"
-
-        blocks.append(
-            f"""
-            <div class="cost-block">
-                <div class="cost-head">
-                    <div><strong>CSB-Tour:</strong> {html.escape(normalize_text(block.get('csb_tour', '')))}</div>
-                    <div><strong>Liefertag:</strong> {html.escape(normalize_text(block.get('liefertag', '')))}</div>
-                    <div><strong>Tourengruppe:</strong> {html.escape(normalize_text(block.get('tourengruppe', '')))}</div>
-                    <div><strong>Bereich:</strong> {html.escape(normalize_text(block.get('bereich', '')))}</div>
-                    <div><strong>Kostenstelle:</strong> {html.escape(normalize_text(block.get('kostenstelle', '')))}</div>
-                    <div><strong>Leiter:</strong> {html.escape(normalize_text(block.get('leiter', '')))}</div>
-                </div>
-                {supplier_table}
-                {hint_html}
-            </div>
-            """
-        )
-
-    return "".join(blocks)
 
 
 def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_kostenplan: pd.DataFrame) -> str:
@@ -1057,12 +1059,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_ko
     category = normalize_text(customer.get("Kategorie", ""))
     csb_nr = normalize_text(customer.get("CSB_Nr", ""))
     fachberater = normalize_text(customer.get("Fachberater", ""))
-
-    rahmentouren = sorted({normalize_text(v) for v in customer_rows.get("Rahmentour_Raw", pd.Series(dtype=str)).tolist() if normalize_text(v)})
-    verladetore = sorted({normalize_text(v) for v in customer_rows.get("Verladetor", pd.Series(dtype=str)).tolist() if normalize_text(v)})
     csb_touren = sorted({normalize_text(v) for v in customer_rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist() if normalize_text(v)})
-
-    schedule_blocks = summarize_cost_schedules(customer_rows, df_kostenplan)
 
     return f"""
     <div class="paper">
@@ -1073,8 +1070,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_ko
             </div>
             <div class="header-facts">
                 <div><strong>Kategorie:</strong> {html.escape(category)}</div>
-                <div><strong>Rahmentouren:</strong> {html.escape(", ".join(rahmentouren) or "-")}</div>
-                <div><strong>Verladetore:</strong> {html.escape(", ".join(verladetore) or "-")}</div>
+                <div><strong>CSB-Touren:</strong> {html.escape(', '.join(csb_touren) or '-')}</div>
             </div>
         </div>
 
@@ -1085,15 +1081,10 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, df_ko
             <div class="meta-card"><span class="meta-label">Fachberater</span><span class="meta-value">{html.escape(fachberater)}</span></div>
             <div class="meta-card"><span class="meta-label">Adresse</span><span class="meta-value">{html.escape(address)}</span></div>
             <div class="meta-card"><span class="meta-label">Postleitzahl / Ort</span><span class="meta-value">{html.escape(plz_ort)}</span></div>
-            <div class="meta-card"><span class="meta-label">Planzeilen</span><span class="meta-value">{html.escape(str(len(customer_rows)))}</span></div>
-            <div class="meta-card"><span class="meta-label">CSB-Touren</span><span class="meta-value">{html.escape(", ".join(csb_touren) or "-")}</span></div>
         </div>
 
-        <h3 class="section-title">Sortimentsplan</h3>
-        {render_plan_table(customer_rows)}
-
-        <h3 class="section-title">Kostenstellenplan mit Lagerware, AVO und Werbemitteln</h3>
-        {render_cost_schedule_blocks(schedule_blocks)}
+        <h3 class="section-title">Planliste mit Sortimenten und CSB-Zeiten</h3>
+        {render_combined_plan_table(customer_rows, df_kostenplan)}
     </div>
     """
 
@@ -1375,8 +1366,8 @@ def main() -> None:
                 <h3>Zusätzliche Regeln</h3>
                 <ul>
                     <li>Doppelte SAP-Zeilen werden je SAP-Nummer, Bestelltag und Liefertyp bereinigt.</li>
-                    <li>Der Kostenstellenplan wird je CSB-Tournummer aus dem Blatt CSB Standard zugeordnet.</li>
-                    <li>AVO, Werbemittel-Sonder, Werbemittel und Hamburger Jungs werden mit Zeit, Vorlauf und Bestelltag ausgegeben.</li>
+                    <li>Die CSB-Daten werden direkt in die Hauptliste eingebaut und nicht als eigener Block ausgegeben.</li>
+                    <li>AVO, Werbemittel-Sonder, Werbemittel und Hamburger Jungs erscheinen als eigene Listenzeilen mit Zeit, Vorlauf und Bestelltag.</li>
                 </ul>
             </div>
             """,
