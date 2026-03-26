@@ -361,6 +361,182 @@ def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: s
 
 
 # ============================================================
+# ZUSATZ-SORTIMENTE AUS KOSTENSTELLENPLAN (AVO, WERBEMITTEL …)
+# ============================================================
+
+# Liefertyp-Gruppen: (Spaltenindex T.Zeit, Bestellzeitende-Fallback, Anzeigename)
+_KST_ZUSATZ_GRUPPEN = [
+    (7,  "09:00", "AVO-Gewürze"),
+    (10, "09:00", "Werbemittel-Sonder"),
+    (13, "09:00", "Werbemittel"),
+    (16, "09:00", "Hamburger Jungs"),
+]
+
+_TAG_ABK = {
+    "mo": "Montag", "die": "Dienstag", "mitt": "Mittwoch", "mi": "Mittwoch",
+    "don": "Donnerstag", "do": "Donnerstag", "fr": "Freitag", "sa": "Samstag", "so": "Sonntag",
+}
+
+def _parse_kst_time(val) -> str:
+    """Wandelt z.B. 915 -> '09:15', 1045 -> '10:45', 2045 -> '20:45'."""
+    if val is None:
+        return ""
+    try:
+        n = int(float(str(val).strip()))
+    except (ValueError, TypeError):
+        return ""
+    if n <= 0:
+        return ""
+    s = f"{n:04d}"  # pad to 4 digits
+    return f"{s[:2]}:{s[2:]}"
+
+
+def _parse_kst_tag(val) -> str:
+    """Wandelt 'Don' -> 'Donnerstag', 'Fr' -> 'Freitag' etc."""
+    if val is None:
+        return ""
+    key = str(val).strip().lower()
+    return _TAG_ABK.get(key, str(val).strip())
+
+
+@st.cache_data(show_spinner=False)
+def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
+    """Extrahiert den Bestellplan fuer Zusatz-Sortimente (AVO, Werbemittel, …)
+    aus dem Kostenstellenplan CSB Standard.
+
+    Ergebnis-DataFrame: tourengruppe | liefertag | sortiment | bestelltag | bestellzeitende
+    """
+    import openpyxl as _opx
+    import io as _io
+    import re as _re
+
+    wb = _opx.load_workbook(_io.BytesIO(file_bytes), read_only=True)
+    if "CSB Standard" not in wb.sheetnames:
+        return pd.DataFrame(columns=["tourengruppe","liefertag","sortiment","bestelltag","bestellzeitende"])
+
+    ws = wb["CSB Standard"]
+    all_rows = list(ws.iter_rows(values_only=True))
+
+    skip_tokens = ("lieferanten", "normale touren", "tourengruppen", "tourengruppe")
+    current_day = ""
+    records = []
+
+    for row in all_rows:
+        a = normalize_text(row[0]) if row[0] is not None else ""
+        d = row[3] if len(row) > 3 else None
+
+        # Kopfzeile erkennnen
+        if a.lower() == "tourengruppen":
+            current_day = normalize_text(d).capitalize() if d else ""
+            continue
+
+        # Zeilen ohne Tourengruppe oder ohne aktuellen Tag überspringen
+        if not a or not current_day:
+            continue
+        if any(a.lower().startswith(t) for t in skip_tokens):
+            continue
+
+        # Brauchen SAP-Bereich (B) zur Validierung dass es eine Datenzeile ist
+        b = row[1] if len(row) > 1 else None
+        if b is None:
+            continue
+        b_str = str(b).strip()
+        if not _re.search(r'\d', b_str):
+            continue
+
+        # Für jede Zusatz-Gruppe
+        for col_start, zeit_fallback, sortiment_name in _KST_ZUSATZ_GRUPPEN:
+            if len(row) <= col_start + 2:
+                continue
+            zeit_val  = row[col_start]       # Abfahrtszeit
+            tag_val   = row[col_start + 2]   # Bestelltag-Kuerzel
+
+            if zeit_val is None and tag_val is None:
+                continue  # kein Eintrag fuer diese Gruppe
+
+            bestellzeitende = _parse_kst_time(zeit_val) or zeit_fallback
+            bestelltag      = _parse_kst_tag(tag_val)
+
+            if not bestelltag:
+                continue
+
+            records.append({
+                "tourengruppe":   a,
+                "liefertag":      current_day,
+                "sortiment":      sortiment_name,
+                "bestelltag":     bestelltag,
+                "bestellzeitende": bestellzeitende,
+            })
+
+    return pd.DataFrame(records) if records else pd.DataFrame(
+        columns=["tourengruppe","liefertag","sortiment","bestelltag","bestellzeitende"]
+    )
+
+
+def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFrame) -> pd.DataFrame:
+    """Generiert synthetische Planzeilen fuer AVO, Werbemittel etc.
+
+    Fuer jede einzigartige (SAP_Nr, Liefertag) Kombination in plan_rows wird geprueft,
+    ob es passende Eintraege in zusatz_schedule gibt (via Tourengruppe x Liefertag).
+    Falls ja, wird eine neue Zeile erzeugt und angehaengt.
+    """
+    if zusatz_schedule.empty or plan_rows.empty:
+        return plan_rows
+
+    # Basis-Info pro (SAP_Nr, Liefertag): nimm erste Zeile
+    basis_cols = ["SAP_Nr", "Liefertag", "Tourengruppe", "Kostenstelle", "Leiter",
+                  "CSB Tournummer", "Verladetor", "Rahmentour_Raw", "SAP Rahmentour",
+                  "Bestelltag", "SortKey_Bestelltag",
+                  "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater", "Kategorie",
+                  "Kisoft_Key", "Liefertyp_ID", "Liefertyp_Name"]
+    avail_cols = [c for c in basis_cols if c in plan_rows.columns]
+
+    basis = (
+        plan_rows[avail_cols]
+        .drop_duplicates(subset=["SAP_Nr", "Liefertag"])
+        .copy()
+    )
+
+    # Normalize Tourengruppe in schedule for matching
+    sched = zusatz_schedule.copy()
+    sched["tourengruppe_norm"] = sched["tourengruppe"].str.strip().str.lower()
+    basis["tourengruppe_norm"] = basis["Tourengruppe"].str.strip().str.lower()
+
+    new_rows = []
+    for _, base in basis.iterrows():
+        tg_norm   = base["tourengruppe_norm"]
+        liefertag = base["Liefertag"]
+        if not tg_norm or not liefertag:
+            continue
+
+        matches = sched[
+            (sched["tourengruppe_norm"] == tg_norm) &
+            (sched["liefertag"].str.lower() == liefertag.lower())
+        ]
+
+        for _, m in matches.iterrows():
+            new_row = base.drop("tourengruppe_norm").to_dict()
+            new_row["Sortiment"]       = m["sortiment"]
+            new_row["Bestelltag_Name"] = m["bestelltag"]
+            new_row["Bestellzeitende"] = m["bestellzeitende"]
+            new_row["Liefertag"]       = liefertag
+            new_row["SortKey_Sortiment"] = m["sortiment"]
+            new_rows.append(new_row)
+
+    if not new_rows:
+        return plan_rows
+
+    zusatz_df = pd.DataFrame(new_rows)
+    # Fehlende Spalten auffuellen
+    for col in plan_rows.columns:
+        if col not in zusatz_df.columns:
+            zusatz_df[col] = ""
+
+    combined = pd.concat([plan_rows, zusatz_df[plan_rows.columns]], ignore_index=True)
+    return combined
+
+
+# ============================================================
 # LOOKUP UND AUFBEREITUNG
 # ============================================================
 def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataFrame) -> pd.DataFrame:
@@ -485,6 +661,10 @@ def prepare_dataframes(
     kunden_basis = kunden_basis.merge(kst_agg, on="SAP_Nr", how="left")
     for col in ["Tourengruppe", "Kostenstelle", "Leiter"]:
         kunden_basis[col] = kunden_basis[col].fillna("")
+
+    # Zusatz-Sortimente (AVO, Werbemittel etc.) aus Kostenstellenplan generieren
+    zusatz_schedule = extract_zusatz_schedule(kostenstellen_bytes, kostenstellen_name)
+    plan_rows = build_zusatz_plan_rows(plan_rows, zusatz_schedule)
 
     counts = {cat: int((kunden_basis["Kategorie"] == cat).sum()) for cat in KATEGORIEN if cat != "Alle"}
     counts["Alle"] = int(len(kunden_basis))
