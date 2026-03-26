@@ -1071,30 +1071,42 @@ def export_css() -> str:
         /* ══════════════════════════════════════
            DRUCK
         ══════════════════════════════════════ */
-        @page { size: A4 portrait; margin: 8mm; }
+        @page {
+            size: A4 portrait;
+            margin: 0;
+        }
 
         @media print {
-            body { background: white; }
-            .search-bar { display: none !important; }
-            .page-stack { padding: 0; }
-            .paper, .cover-page, .separator-page {
-                width: 100% !important;
-                min-height: auto !important;
-                box-shadow: none !important;
+            html, body {
+                background: white !important;
+                width: 210mm !important;
                 margin: 0 !important;
-                padding: 6mm 8mm !important;
+                padding: 0 !important;
+            }
+            .search-bar { display: none !important; }
+            .page-stack { padding: 0 !important; }
+
+            .customer-entry {
                 page-break-after: always;
                 break-after: page;
             }
-            .paper:last-child,
-            .separator-page:last-child,
-            .cover-page:last-child {
+            .customer-entry:last-child {
                 page-break-after: auto;
                 break-after: auto;
             }
-            .is-match, .is-current {
-                outline: none !important;
+
+            .paper {
+                width: 210mm !important;
+                min-height: 0 !important;
+                max-height: none !important;
+                margin: 0 !important;
+                padding: 10mm 12mm !important;
+                box-shadow: none !important;
+                border-radius: 0 !important;
+                page-break-inside: avoid;
             }
+
+            .is-match, .is-current { outline: none !important; }
         }
     </style>
     """
@@ -1534,7 +1546,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     <html lang="de">
     <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="viewport" content="width=210mm, initial-scale=1.0" />
         <title>Sendeplan-Export</title>
         {export_css()}
     </head>
@@ -1555,7 +1567,7 @@ def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame,
     <html lang="de">
     <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta name="viewport" content="width=210mm, initial-scale=1.0" />
         <title>Sendeplan {html.escape(normalize_text(customer.get('SAP_Nr', '')))}</title>
         {export_css()}
     </head>
