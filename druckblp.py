@@ -1316,21 +1316,11 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     }
     subtitle = subtitle_map.get(kategorie, kategorie or "Standart")
 
-    # Zusatzinfo unterhalb Subtitle
-    info_parts = []
-    if tourengruppe:
-        info_parts.append(tourengruppe)
-    if kostenstelle:
-        info_parts.append(f"Kostenstelle {kostenstelle}")
-    if leiter:
-        info_parts.append(f"Leiter {leiter}")
-    allsortiments_line = " &mdash; ".join(info_parts) if info_parts else "Alle Sortimente Fleischwerk"
-
     tour_overview_html = render_tour_overview(customer_rows)
     plan_table_html    = render_plan_table(customer_rows)
 
-    # Kunden-Nr. = CSB-Nummer (4-stellig) ohne führende Null/langen SAP-Key
-    kunden_nr = csb_nr if csb_nr else sap_nr
+    # Kunden-Nr. im Ausdruck immer als SAP-Nummer anzeigen
+    kunden_nr = sap_nr
 
     return f"""
     <div class="paper" data-autofit="a4">
@@ -1348,7 +1338,6 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
                     <div class="doc-title-block">
                         <div class="doc-title">Sende- &amp; Belieferungsplan</div>
                         <div class="doc-subtitle">{html.escape(subtitle)}</div>
-                        <div class="doc-allsortiments">{allsortiments_line}</div>
                     </div>
 
                     <div class="doc-logo">
