@@ -872,6 +872,8 @@ def export_css() -> str:
         .search-btn:hover { background: #3a6bc4; }
         .search-btn.reset { background: #c0392b; }
         .search-btn.reset:hover { background: #e74c3c; }
+        .search-btn.print-btn { background: #1a7a3a; }
+        .search-btn.print-btn:hover { background: #22a34e; }
         .search-count {
             font-size: 12px;
             color: #bcd0ec;
@@ -1353,23 +1355,14 @@ def render_export_search_toolbar() -> str:
         <button type="button" class="search-btn" id="btn-next" title="Nächster (Enter)">&#8681;</button>
         <button type="button" class="search-btn reset" id="btn-reset" title="Zurücksetzen (Esc)">&#10005;</button>
         <span class="search-count" id="search-count"></span>
+        <button type="button" class="search-btn print-btn" onclick="window.print()" title="Drucken">&#128438; Drucken</button>
         <span class="search-empty" id="search-empty">Keine Treffer.</span>
     </nav>
     """
 
 
 def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png") -> str:
-    docs: List[str] = [
-        render_cover_page(
-            title="Sendeplan-Generator",
-            subtitle="Gesamtplan",
-            lines=[
-                f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr",
-                f"Kundenanzahl: {len(customers)}",
-                "Diese HTML-Datei ist vollständig eigenständig und direkt im Browser durchsuchbar.",
-            ],
-        )
-    ]
+    docs: List[str] = []
 
     entry_count = 0
     for _, customer in customers.iterrows():
@@ -1400,10 +1393,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             if part
         ).lower()
 
-        entry_parts: List[str] = []
-        if include_separators:
-            entry_parts.append(render_separator_page(customer))
-        entry_parts.append(render_customer_plan(customer, rows, logo_b64=logo_b64, logo_mime=logo_mime))
+        entry_parts: List[str] = [render_customer_plan(customer, rows, logo_b64=logo_b64, logo_mime=logo_mime)]
 
         csb_search = " ".join([part for part in [csb_nr, *csb_touren] if part]).lower()
         docs.append(
@@ -1891,7 +1881,7 @@ def main() -> None:
                              "png": "image/png", "svg": "image/svg+xml",
                              "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
             bulk_html = build_full_document_html(filtered_customers, plan_rows_df,
-                            include_separators=True, logo_b64=logo_b64, logo_mime=logo_mime)
+                            logo_b64=logo_b64, logo_mime=logo_mime)
             filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
 
             col1, col2 = st.columns(2)
