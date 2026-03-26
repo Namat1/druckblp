@@ -1223,7 +1223,7 @@ def logo_img_tag(logo_b64: str, logo_mime: str = "image/png") -> str:
     if logo_b64:
         return (
             f'<img src="data:{logo_mime};base64,{logo_b64}" ' 
-            f'alt="NORDfrische Center" style="height:28mm; width:auto; display:block;">' 
+            f'alt="NORDfrische Center" style="max-width:44mm; max-height:20mm; width:auto; height:auto; display:block; margin-left:auto;">' 
         )
     # CSS-Fallback
     return """
