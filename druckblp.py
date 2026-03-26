@@ -639,110 +639,186 @@ def export_css() -> str:
             --paper-min-height: 297mm;
             --border-color: #aaaaaa;
             --muted: #5f6b76;
-            --accent: #1f4e79;
+            --accent: #1a1a1a;
+            --header-blue: #003366;
         }
+
+        * { box-sizing: border-box; }
 
         body {
             margin: 0;
-            background: #eef2f7;
-            color: #222;
+            background: #e8ecf0;
+            color: #1a1a1a;
             font-family: Arial, Helvetica, sans-serif;
+            font-size: 10pt;
         }
 
+        /* ── Papier-Seite ── */
         .paper {
             width: 100%;
             max-width: var(--paper-width);
             min-height: var(--paper-min-height);
             margin: 0 auto 1.5rem auto;
             background: white;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-            border-radius: 8px;
-            padding: 12mm;
-            color: #222;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.14);
+            border-radius: 4px;
+            padding: 10mm 12mm 12mm 12mm;
+            color: #1a1a1a;
         }
 
-        .paper-header {
-            display: flex;
-            justify-content: space-between;
+        /* ── Seitenheader: 3 Spalten ── */
+        .doc-header {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 4mm;
             align-items: flex-start;
-            gap: 1rem;
-            margin-bottom: 8mm;
-            border-bottom: 1px solid #d8dde3;
-            padding-bottom: 5mm;
+            margin-bottom: 5mm;
         }
-
-        .paper-title {
-            font-size: 20pt;
+        .doc-address {
+            font-size: 9pt;
+            line-height: 1.45;
+            min-width: 52mm;
+        }
+        .doc-title-block {
+            text-align: center;
+        }
+        .doc-title {
+            font-size: 18pt;
             font-weight: 700;
-            color: var(--accent);
+            color: #1a1a1a;
+            margin: 0 0 1mm 0;
+            letter-spacing: -0.01em;
+        }
+        .doc-subtitle {
+            font-size: 13pt;
+            font-weight: 700;
+            color: #cc0000;
+            margin: 0 0 1mm 0;
+        }
+        .doc-allsortiments {
+            font-size: 9pt;
+            color: #444;
             margin: 0;
         }
-
-        .paper-subtitle {
-            font-size: 10pt;
-            color: var(--muted);
-            margin-top: 2mm;
+        /* NORDfrische Center Logo (CSS-only) */
+        .doc-logo {
+            text-align: right;
+            min-width: 42mm;
         }
-
-        .meta-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 4mm 8mm;
-            margin-bottom: 8mm;
+        .logo-nfc {
+            display: inline-block;
+            border: 2px solid #003366;
+            padding: 2mm 3mm 2mm 3mm;
+            line-height: 1.2;
         }
-
-        .meta-card {
-            border: 1px solid #e3e7ec;
-            border-radius: 6px;
-            padding: 3.5mm 4mm;
-            background: #fbfcfd;
-        }
-
-        .meta-label {
-            display: block;
-            font-size: 8.5pt;
-            color: var(--muted);
-            text-transform: uppercase;
+        .logo-nfc-top {
+            font-size: 7pt;
+            font-weight: 700;
+            color: #003366;
             letter-spacing: 0.04em;
-            margin-bottom: 1mm;
-        }
-
-        .meta-value {
             display: block;
+        }
+        .logo-nfc-main {
             font-size: 11pt;
-            font-weight: 600;
+            font-weight: 900;
+            color: #003366;
+            display: block;
+        }
+        .logo-nfc-sub {
+            font-size: 6.5pt;
+            color: #555;
+            display: block;
+        }
+        .logo-edeka {
+            display: inline-block;
+            border: 2px solid #f5a623;
+            background: #f5a623;
+            color: #003366;
+            font-size: 11pt;
+            font-weight: 900;
+            padding: 1.5mm 2.5mm;
+            margin-left: 1.5mm;
+            vertical-align: top;
         }
 
+        /* ── Infoleiste: Kunden-Nr / Fachberater / Stand ── */
+        .doc-infobar {
+            font-size: 9.5pt;
+            margin: 3mm 0 4mm 0;
+        }
+        .doc-infobar strong { font-weight: 700; }
+
+        /* ── Tour-Übersichtstabelle ── */
+        .tour-overview {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9pt;
+            margin-bottom: 4mm;
+        }
+        .tour-overview td {
+            border: 1px solid #aaa;
+            padding: 1.5mm 2.5mm;
+            white-space: nowrap;
+        }
+        .tour-overview td:first-child {
+            font-weight: 700;
+            background: #f5f5f5;
+            width: 14mm;
+        }
+
+        /* ── Haupttabelle ── */
         .plan-table {
             width: 100%;
             border-collapse: collapse;
             border: 1.5px solid #aaa;
             font-size: 9pt;
-            margin-top: 4mm;
         }
-
-        .plan-table th,
+        .plan-table th {
+            border: 1px solid #aaa;
+            padding: 2mm 2.5mm;
+            text-align: left;
+            font-weight: 700;
+            background: white;
+        }
         .plan-table td {
             border: 1px solid #aaa;
-            padding: 2.5mm 2mm;
+            padding: 1.5mm 2.5mm;
             text-align: left;
             vertical-align: top;
         }
-
-        .plan-table th {
-            background: #eef3f9;
+        /* Liefertag-Zelle: fett, breite 20mm, rowspan */
+        .plan-table td.liefertag-cell {
             font-weight: 700;
+            width: 20mm;
+            vertical-align: top;
+        }
+        /* Sortiment-Zelle */
+        .plan-table td.sortiment-cell {
+            width: auto;
+        }
+        /* Bestelltag / Bestellzeitende */
+        .plan-table td.bestelltag-cell {
+            width: 22mm;
+            white-space: nowrap;
+        }
+        .plan-table td.zeit-cell {
+            width: 22mm;
+            white-space: nowrap;
+        }
+        /* Trennzeile zwischen Liefertagen (dicker oberer Rand) */
+        .plan-table tr.day-start td {
+            border-top: 1.5px solid #888;
         }
 
-        .cover-page,
-        .separator-page {
+        /* ── Cover / Separator ── */
+        .cover-page, .separator-page {
             width: 100%;
             max-width: var(--paper-width);
             min-height: var(--paper-min-height);
             margin: 0 auto 1.5rem auto;
             background: white;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-            border-radius: 8px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.12);
+            border-radius: 4px;
             padding: 18mm 14mm;
             display: flex;
             flex-direction: column;
@@ -751,52 +827,44 @@ def export_css() -> str:
             text-align: center;
             page-break-after: always;
         }
-
-        .cover-page h1,
-        .separator-page h1 {
+        .cover-page h1, .separator-page h1 {
             margin: 0 0 8mm 0;
             font-size: 26pt;
-            color: var(--accent);
+            color: #003366;
         }
-
-        .cover-page h2,
-        .separator-page h2 {
+        .cover-page h2, .separator-page h2 {
             margin: 0 0 4mm 0;
             font-size: 16pt;
             color: #2d3741;
         }
-
-        .cover-page p,
-        .separator-page p {
+        .cover-page p, .separator-page p {
             font-size: 11pt;
-            color: var(--muted);
+            color: #5f6b76;
             margin: 1.5mm 0;
         }
 
+        /* ── Export-Suche ── */
         .export-search-toolbar {
             width: 100%;
             max-width: var(--paper-width);
             margin: 1rem auto;
             background: white;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.12);
             border-radius: 8px;
             padding: 14px 16px;
             color: #1f2933;
         }
-
         .export-search-title {
             margin: 0 0 10px 0;
             font-size: 16px;
             font-weight: 700;
-            color: var(--accent);
+            color: #003366;
         }
-
         .export-search-grid {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 12px;
         }
-
         .export-search-field label {
             display: block;
             font-size: 12px;
@@ -804,18 +872,15 @@ def export_css() -> str:
             color: #44515d;
             margin-bottom: 6px;
         }
-
         .export-search-field input {
             width: 100%;
-            box-sizing: border-box;
             border: 1px solid #cbd5e1;
             border-radius: 8px;
             padding: 10px 12px;
             font-size: 14px;
             color: #111827;
-            background: #ffffff;
+            background: #fff;
         }
-
         .export-search-actions {
             display: flex;
             flex-wrap: wrap;
@@ -823,7 +888,6 @@ def export_css() -> str:
             gap: 12px;
             margin-top: 12px;
         }
-
         .export-search-actions button {
             border: 1px solid #9fb4c8;
             border-radius: 8px;
@@ -833,12 +897,7 @@ def export_css() -> str:
             font-weight: 700;
             cursor: pointer;
         }
-
-        .export-search-results {
-            font-size: 13px;
-            color: #526173;
-        }
-
+        .export-search-results { font-size: 13px; color: #526173; }
         .export-empty-results {
             display: none;
             margin-top: 12px;
@@ -848,39 +907,27 @@ def export_css() -> str:
             background: #fafcfe;
             color: #526173;
         }
+        .customer-entry { display: block; }
 
-        .customer-entry {
-            display: block;
-        }
-
-        @page {
-            size: A4 portrait;
-            margin: 10mm;
-        }
+        @page { size: A4 portrait; margin: 10mm; }
 
         @media print {
-            .export-search-toolbar,
-            .export-empty-results {
+            body { background: white; }
+            .export-search-toolbar, .export-empty-results {
                 display: none !important;
                 visibility: hidden !important;
             }
-
-            .paper,
-            .cover-page,
-            .separator-page {
+            .paper, .cover-page, .separator-page {
                 width: auto !important;
                 min-height: auto !important;
                 box-shadow: none !important;
                 border-radius: 0 !important;
                 margin: 0 !important;
-                padding: 0 !important;
+                padding: 8mm 10mm !important;
                 page-break-after: always;
                 break-after: page;
             }
-
-            .paper:last-child,
-            .separator-page:last-child,
-            .cover-page:last-child {
+            .paper:last-child, .separator-page:last-child, .cover-page:last-child {
                 page-break-after: auto;
                 break-after: auto;
             }
@@ -889,96 +936,196 @@ def export_css() -> str:
     """
 
 
+def render_tour_overview(customer_rows: pd.DataFrame) -> str:
+    """Baut die Tourübersicht-Tabelle: Liefertag -> CSB-Tournummer, nach PDF-Vorbild."""
+    if customer_rows.empty:
+        return ""
+
+    # Pro Liefertag die eindeutigen CSB-Tournummern sammeln (sortiert nach Wochentag-Reihenfolge)
+    day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+    tour_by_day: dict = {}
+    for _, row in customer_rows.iterrows():
+        day = normalize_text(row.get("Liefertag", ""))
+        csb = normalize_text(row.get("CSB Tournummer", ""))
+        if day and csb and day not in tour_by_day:
+            tour_by_day[day] = csb
+
+    if not tour_by_day:
+        return ""
+
+    days_present = [d for d in day_order if d in tour_by_day]
+
+    day_cells  = "".join(f"<td>{html.escape(d)}</td>" for d in days_present)
+    tour_cells = "".join(f"<td>{html.escape(tour_by_day[d])}</td>" for d in days_present)
+
+    return f"""
+    <table class="tour-overview">
+        <tr>
+            <td>Liefertag:</td>
+            {day_cells}
+        </tr>
+        <tr>
+            <td>Tour:</td>
+            {tour_cells}
+        </tr>
+    </table>
+    """
+
+
 def render_plan_table(rows: pd.DataFrame) -> str:
+    """Haupttabelle: Liefertag (rowspan) | Sortiment | Bestelltag | Bestellzeitende.
+    Entspricht exakt dem PDF-Vorbild: Liefertag-Zelle nur einmal pro Tag, fett."""
     if rows.empty:
         return "<p>Keine Planzeilen vorhanden.</p>"
 
-    ordered = rows.sort_values(["SortKey_Bestelltag", "CSB Tournummer", "SortKey_Sortiment", "Bestellzeitende"])
-    body_rows = []
+    day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag", "Unbekannt"]
 
+    # Sortieren: erst nach Liefertag (Wochentag-Reihenfolge), dann Sortiment
+    def day_sort_key(day: str) -> int:
+        try:
+            return day_order.index(day)
+        except ValueError:
+            return 99
+
+    ordered = rows.copy()
+    ordered["_day_order"] = ordered["Liefertag"].map(day_sort_key)
+    ordered = ordered.sort_values(["_day_order", "SortKey_Sortiment", "Bestellzeitende"])
+
+    # Rowspan pro Liefertag zählen
+    day_counts: dict = {}
     for _, row in ordered.iterrows():
+        d = normalize_text(row.get("Liefertag", "Unbekannt"))
+        day_counts[d] = day_counts.get(d, 0) + 1
+
+    body_rows: list = []
+    day_seen: set = set()
+
+    for i, (_, row) in enumerate(ordered.iterrows()):
+        day        = normalize_text(row.get("Liefertag", "Unbekannt"))
+        sortiment  = normalize_text(row.get("Sortiment", ""))
+        bestelltag = normalize_text(row.get("Bestelltag_Name", ""))
+        zeitende   = normalize_text(row.get("Bestellzeitende", ""))
+
+        # "Uhr" anhängen falls nicht schon vorhanden
+        if zeitende and "uhr" not in zeitende.lower():
+            zeitende = zeitende + " Uhr"
+
+        is_day_start = day not in day_seen
+        day_seen.add(day)
+
+        day_cell = ""
+        if is_day_start:
+            rowspan = day_counts[day]
+            day_cell = f'<td class="liefertag-cell" rowspan="{rowspan}">{html.escape(day)}</td>'
+
+        tr_class = ' class="day-start"' if is_day_start else ""
+
         body_rows.append(
-            f"""
-            <tr>
-                <td>{html.escape(normalize_text(row.get('Liefertag', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('CSB Tournummer', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Sortiment', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Bestelltag_Name', '')))}</td>
-                <td>{html.escape(normalize_text(row.get('Bestellzeitende', '')))}</td>
-            </tr>
-            """
+            f"""<tr{tr_class}>
+                {day_cell}
+                <td class="sortiment-cell">{html.escape(sortiment)}</td>
+                <td class="bestelltag-cell">{html.escape(bestelltag)}</td>
+                <td class="zeit-cell">{html.escape(zeitende)}</td>
+            </tr>"""
         )
 
     return f"""
     <table class="plan-table">
         <thead>
             <tr>
-                <th>Liefertag</th>
-                <th>CSB-Tour</th>
-                <th>Eintrag</th>
-                <th>Bestelltag</th>
-                <th>Bestellzeitende</th>
+                <th style="width:20mm;">Liefertag</th>
+                <th>Sortiment</th>
+                <th style="width:22mm;">Bestelltag</th>
+                <th style="width:24mm;">Bestellzeitende</th>
             </tr>
         </thead>
         <tbody>
-            {''.join(body_rows)}
+            {"".join(body_rows)}
         </tbody>
     </table>
     """
 
 
 def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> str:
-    sap_nr = normalize_text(customer.get("SAP_Nr", ""))
-    name = normalize_text(customer.get("Name", ""))
-    address = normalize_text(customer.get("Strasse", ""))
-    plz_ort = " ".join(filter(None, [normalize_text(customer.get("PLZ", "")), normalize_text(customer.get("Ort", ""))]))
-    category = normalize_text(customer.get("Kategorie", ""))
-    csb_nr = normalize_text(customer.get("CSB_Nr", ""))
+    """Rendert eine einzelne Kundenseite exakt nach dem PDF-Vorbild."""
+    sap_nr      = normalize_text(customer.get("SAP_Nr", ""))
+    csb_nr      = normalize_text(customer.get("CSB_Nr", ""))
+    name        = normalize_text(customer.get("Name", ""))
+    strasse     = normalize_text(customer.get("Strasse", ""))
+    plz         = normalize_text(customer.get("PLZ", ""))
+    ort         = normalize_text(customer.get("Ort", ""))
     fachberater = normalize_text(customer.get("Fachberater", ""))
     tourengruppe = normalize_text(customer.get("Tourengruppe", ""))
     kostenstelle = normalize_text(customer.get("Kostenstelle", ""))
-    leiter = normalize_text(customer.get("Leiter", ""))
+    leiter       = normalize_text(customer.get("Leiter", ""))
+    stand = datetime.now().strftime("%d.%m.%Y")
 
-    verladetor = ""
-    rahmentour = normalize_text(customer.get("Rahmentour_Raw", ""))
+    # Tourengruppe -> Subtitle (Standart / NMS / Malchow / MK …)
+    kategorie = normalize_text(customer.get("Kategorie", ""))
+    subtitle_map = {
+        "Direkt": "Standart",
+        "NMS":    "NMS",
+        "Malchow":"Malchow",
+        "MK":     "MK",
+    }
+    subtitle = subtitle_map.get(kategorie, kategorie or "Standart")
 
-    if not customer_rows.empty:
-        verladetor_series = customer_rows["Verladetor"].dropna().astype(str).str.strip()
-        rahmentour_series = customer_rows["Rahmentour_Raw"].dropna().astype(str).str.strip()
-        non_empty_verladetor = verladetor_series[verladetor_series != ""]
-        non_empty_rahmentour = rahmentour_series[rahmentour_series != ""]
-        if not non_empty_verladetor.empty:
-            verladetor = normalize_text(non_empty_verladetor.iloc[0])
-        if not non_empty_rahmentour.empty:
-            rahmentour = normalize_text(non_empty_rahmentour.iloc[0])
+    # Zusatzinfo unterhalb Subtitle
+    info_parts = []
+    if tourengruppe:
+        info_parts.append(tourengruppe)
+    if kostenstelle:
+        info_parts.append(f"Kostenstelle {kostenstelle}")
+    if leiter:
+        info_parts.append(f"Leiter {leiter}")
+    allsortiments_line = " &mdash; ".join(info_parts) if info_parts else "Alle Sortimente Fleischwerk"
+
+    tour_overview_html = render_tour_overview(customer_rows)
+    plan_table_html    = render_plan_table(customer_rows)
+
+    # Kunden-Nr. = CSB-Nummer (4-stellig) ohne führende Null/langen SAP-Key
+    kunden_nr = csb_nr if csb_nr else sap_nr
 
     return f"""
     <div class="paper">
-        <div class="paper-header">
-            <div>
-                <h1 class="paper-title">Sendeplan</h1>
-                <div class="paper-subtitle">Generiert am {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr</div>
+
+        <!-- ===== HEADER: Adresse | Titel | Logo ===== -->
+        <div class="doc-header">
+            <div class="doc-address">
+                <strong>{html.escape(name)}</strong><br>
+                {html.escape(strasse)}<br>
+                {html.escape(plz)} {html.escape(ort)}
             </div>
-            <div style="text-align:right; font-size:10pt; color:#5f6b76;">
-                <div><strong>Kategorie:</strong> {html.escape(category)}</div>
-                <div><strong>Rahmentour:</strong> {html.escape(rahmentour)}</div>
-                <div><strong>Verladetor:</strong> {html.escape(verladetor)}</div>
+
+            <div class="doc-title-block">
+                <div class="doc-title">Sende- &amp; Belieferungsplan</div>
+                <div class="doc-subtitle">{html.escape(subtitle)}</div>
+                <div class="doc-allsortiments">{allsortiments_line}</div>
+            </div>
+
+            <div class="doc-logo">
+                <span class="logo-nfc">
+                    <span class="logo-nfc-top">NORD</span>
+                    <span class="logo-nfc-main">frische Center</span>
+                    <span class="logo-nfc-sub">Das Fleischwerk von EDEKA Nord</span>
+                </span>
+                <span class="logo-edeka">E</span>
             </div>
         </div>
 
-        <div class="meta-grid">
-            <div class="meta-card"><span class="meta-label">SAP-Nummer</span><span class="meta-value">{html.escape(sap_nr)}</span></div>
-            <div class="meta-card"><span class="meta-label">CSB-Nummer</span><span class="meta-value">{html.escape(csb_nr)}</span></div>
-            <div class="meta-card"><span class="meta-label">Kunde</span><span class="meta-value">{html.escape(name)}</span></div>
-            <div class="meta-card"><span class="meta-label">Fachberater</span><span class="meta-value">{html.escape(fachberater)}</span></div>
-            <div class="meta-card"><span class="meta-label">Adresse</span><span class="meta-value">{html.escape(address)}</span></div>
-            <div class="meta-card"><span class="meta-label">PLZ / Ort</span><span class="meta-value">{html.escape(plz_ort)}</span></div>
-            <div class="meta-card"><span class="meta-label">Tourengruppe</span><span class="meta-value">{html.escape(tourengruppe)}</span></div>
-            <div class="meta-card"><span class="meta-label">Kostenstelle</span><span class="meta-value">{html.escape(kostenstelle)}</span></div>
-            <div class="meta-card"><span class="meta-label">Leiter</span><span class="meta-value">{html.escape(leiter)}</span></div>
+        <!-- ===== INFOLEISTE ===== -->
+        <div class="doc-infobar">
+            <strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}&nbsp;&nbsp;&nbsp;
+            <strong>Fachberater:</strong> {html.escape(fachberater)}&nbsp;&nbsp;&nbsp;
+            <strong>Stand:</strong> {html.escape(stand)}
         </div>
 
-        {render_plan_table(customer_rows)}
+        <!-- ===== TOUR-ÜBERSICHT ===== -->
+        {tour_overview_html}
+
+        <!-- ===== PLANTABELLE ===== -->
+        {plan_table_html}
+
     </div>
     """
 
