@@ -1,5 +1,6 @@
 import html
 import io
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -69,7 +70,7 @@ UPLOAD_CONFIG = {
 }
 
 KISOFT_REQUIRED_COLUMNS = ["SAP Rahmentour", "CSB Tournummer", "Verladetor"]
-KOSTENSTELLEN_REQUIRED_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "leiter"]
+KOSTENSTELLEN_REQUIRED_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "kostenstelle", "leiter"]
 
 
 # ============================================================
@@ -234,43 +235,103 @@ def load_kisoft_upload(file_bytes: bytes, filename: str, csv_separator: str) -> 
     return df
 
 
+def _parse_sap_range_col(value) -> tuple:
+    """Parst den SAP-Bereich aus Spalte B des Kostenstellenplans.
+
+    Formate: '12221-14444', '1881 - 1886', '1001-1046 + 58', 5883 (Einzelwert)
+    Toleriert None, float NaN und den String 'nan' (entsteht bei dtype=str).
+    """
+    if value is None:
+        return ("", "")
+    if isinstance(value, float):
+        if pd.isna(value):
+            return ("", "")
+        # numerischer Einzelwert (z.B. 5883.0)
+        text = str(int(value))
+    else:
+        text = str(value).strip()
+    # leere oder NaN-artige Strings
+    if not text or text.lower() in ("nan", "none", ""):
+        return ("", "")
+    text = re.sub(r'\s*\+.*$', '', text).strip()
+    parts = re.split(r'\s*-\s*', text, maxsplit=1)
+    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        return (parts[0].strip(), parts[1].strip())
+    if text.isdigit():
+        return (text, text)
+    return ("", "")
+
+
 @st.cache_data(show_spinner=False)
 def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    """Liest den Kostenstellenplan.
+
+    Feste Spaltenreihenfolge:
+      A = Tourengruppe  (z.B. 'HP-NMS/Zar', 'Direkt Früh')
+      B = SAP-Bereich   (z.B. '12221-14444', '1001-1046 + 58', 5883)
+      C = Kostenstelle  (z.B. 10, 41)
+      D = Leiter        (z.B. 13, 43)
+
+    Lookup erfolgt später über die CSB-Tournummer (z.B. 4007 liegt in 4001-4058).
+    """
     suffix = Path(filename).suffix.lower()
 
     if suffix == ".csv":
-        df = None
-        for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
-            try:
-                df = pd.read_csv(
-                    io.BytesIO(file_bytes),
-                    sep=csv_separator,
-                    dtype=str,
-                    encoding=encoding,
-                    keep_default_na=False,
-                )
-                break
-            except Exception:
-                df = None
-        if df is None:
-            raise ValueError("Kostenstellen-CSV konnte nicht gelesen werden.")
-    else:
-        df = pd.read_excel(io.BytesIO(file_bytes), dtype=str)
-
-    df.columns = [normalize_text(column) for column in df.columns]
-    missing = [col for col in KOSTENSTELLEN_REQUIRED_COLUMNS if col not in df.columns]
-
-    if missing:
+        # CSV: nur ein Blatt, direkt lesen
         raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
-        if raw_df.shape[1] < 4:
-            raise ValueError("Kostenstellen-Datei benötigt mindestens 4 Spalten.")
-        df = raw_df.iloc[:, :4].copy()
-        df.columns = KOSTENSTELLEN_REQUIRED_COLUMNS
+    else:
+        # Excel: richtiges Sheet suchen (enthaelt numerische SAP-Bereiche in Spalte B)
+        import openpyxl as _openpyxl
+        _wb = _openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+        _chosen = None
+        for _sname in _wb.sheetnames:
+            _ws = _wb[_sname]
+            for _row in _ws.iter_rows(max_row=20, values_only=True):
+                _b = str(_row[1]).strip() if len(_row) > 1 and _row[1] is not None else ""
+                if re.search(r'\d{4,}', _b):  # SAP-Bereich hat mind. 4 Ziffern
+                    _chosen = _sname
+                    break
+            if _chosen:
+                break
+        if _chosen is None:
+            _chosen = _wb.sheetnames[0]
+        raw_df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=_chosen, header=None, dtype=str)
 
-    df = cleanup_dataframe(df, "sap_von")
-    for column in KOSTENSTELLEN_REQUIRED_COLUMNS:
-        df[column] = df[column].map(normalize_text)
+    if raw_df.shape[1] < 4:
+        raise ValueError("Kostenstellen-Datei benoetigt mindestens 4 Spalten (A-D).")
 
+    records = []
+    skip_tokens = ("lieferanten", "normale touren", "tourengruppen", "tourengruppe")
+    for _, row in raw_df.iterrows():
+        tourengruppe = normalize_text(row.iloc[0])
+        sap_bereich  = row.iloc[1]
+        kostenstelle = normalize_text(row.iloc[2])
+        leiter       = normalize_text(row.iloc[3])
+
+        if not tourengruppe:
+            continue
+        if any(tourengruppe.lower().startswith(t) for t in skip_tokens):
+            continue
+
+        sap_von, sap_bis = _parse_sap_range_col(sap_bereich)
+        if not sap_von:
+            continue
+
+        records.append({
+            "tourengruppe": tourengruppe,
+            "sap_von":      sap_von,
+            "sap_bis":      sap_bis,
+            "kostenstelle": kostenstelle,
+            "leiter":       leiter,
+        })
+
+    if not records:
+        raise ValueError(
+            "Kostenstellenplan: Keine Datenzeilen gefunden. "
+            "Spaltenreihenfolge pruefen: A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter."
+        )
+
+    df = pd.DataFrame(records)
     validate_required_columns(df, KOSTENSTELLEN_REQUIRED_COLUMNS, "Kostenstellen-Datei")
     return df
 
@@ -278,28 +339,35 @@ def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: s
 # ============================================================
 # LOOKUP UND AUFBEREITUNG
 # ============================================================
-def apply_kostenstellen_lookup(df_base: pd.DataFrame, df_kostenstellen: pd.DataFrame) -> pd.DataFrame:
+def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataFrame) -> pd.DataFrame:
+    """Ergaenzt Tourengruppe, Kostenstelle und Leiter anhand der CSB-Tournummer.
+
+    Der Kostenstellenplan enthaelt numerische Bereiche (sap_von/sap_bis).
+    Die CSB-Tournummer (4-stellig, z.B. 4007) wird numerisch gegen diese
+    Bereiche geprueft. Das Ergebnis wird je plan_row gesetzt.
+    """
     table = df_kostenstellen.copy()
-    table["sap_von_num"] = pd.to_numeric(table["sap_von"].map(normalize_digits), errors="coerce")
-    table["sap_bis_num"] = pd.to_numeric(table["sap_bis"].map(normalize_digits), errors="coerce")
+    table["sap_von_num"] = pd.to_numeric(table["sap_von"], errors="coerce")
+    table["sap_bis_num"] = pd.to_numeric(table["sap_bis"], errors="coerce")
+    table = table.dropna(subset=["sap_von_num", "sap_bis_num"])
 
-    def lookup_row(sap_nr: str) -> pd.Series:
-        sap_num = pd.to_numeric(normalize_digits(sap_nr), errors="coerce")
-        if pd.isna(sap_num):
-            return pd.Series({"Tourengruppe": "", "Leiter": ""})
-
-        match = table[(table["sap_von_num"] <= sap_num) & (table["sap_bis_num"] >= sap_num)]
+    def lookup_csb(csb_tour: str) -> pd.Series:
+        empty = pd.Series({"Tourengruppe": "", "Kostenstelle": "", "Leiter": ""})
+        num = pd.to_numeric(normalize_digits(csb_tour), errors="coerce")
+        if pd.isna(num):
+            return empty
+        match = table[(table["sap_von_num"] <= num) & (table["sap_bis_num"] >= num)]
         if match.empty:
-            return pd.Series({"Tourengruppe": "", "Leiter": ""})
-
+            return empty
         row = match.iloc[0]
         return pd.Series({
             "Tourengruppe": normalize_text(row["tourengruppe"]),
-            "Leiter": normalize_text(row["leiter"]),
+            "Kostenstelle": normalize_text(row["kostenstelle"]),
+            "Leiter":       normalize_text(row["leiter"]),
         })
 
-    result = df_base.copy()
-    result[["Tourengruppe", "Leiter"]] = result["SAP_Nr"].apply(lookup_row)
+    result = df_plan.copy()
+    result[["Tourengruppe", "Kostenstelle", "Leiter"]] = result["CSB Tournummer"].apply(lookup_csb)
     return result
 
 
@@ -358,23 +426,10 @@ def prepare_dataframes(
         lambda row: classify_customer(row.get("Rahmentour_Raw", ""), row.get("CSB_Nr", "")),
         axis=1,
     )
-    kunden_basis = apply_kostenstellen_lookup(kunden_basis, df_kostenstellen)
 
+    # Basis-Merge: Kundenstamm bekommt Grundinfos aus plan_rows
     plan_rows = df_sap.merge(
-        kunden_basis[
-            [
-                "SAP_Nr",
-                "CSB_Nr",
-                "Name",
-                "Strasse",
-                "PLZ",
-                "Ort",
-                "Fachberater",
-                "Kategorie",
-                "Tourengruppe",
-                "Leiter",
-            ]
-        ],
+        kunden_basis[["SAP_Nr", "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater", "Kategorie"]],
         on="SAP_Nr",
         how="left",
     )
@@ -386,6 +441,20 @@ def prepare_dataframes(
     plan_rows["Verladetor"] = plan_rows["Verladetor"].fillna("")
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
     plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("")
+
+    # Kostenstellen-Lookup auf plan_rows (CSB-Tournummer ist jetzt verfuegbar)
+    plan_rows = apply_kostenstellen_lookup(plan_rows, df_kostenstellen)
+
+    # Tourengruppe / Kostenstelle / Leiter zurueck auf kunden_basis aggregieren
+    # (erster nicht-leerer Wert pro SAP_Nr, damit die Kundenkarte diese Felder zeigt)
+    kst_agg = (
+        plan_rows[plan_rows["Tourengruppe"] != ""]
+        .drop_duplicates(subset=["SAP_Nr"])
+        [["SAP_Nr", "Tourengruppe", "Kostenstelle", "Leiter"]]
+    )
+    kunden_basis = kunden_basis.merge(kst_agg, on="SAP_Nr", how="left")
+    for col in ["Tourengruppe", "Kostenstelle", "Leiter"]:
+        kunden_basis[col] = kunden_basis[col].fillna("")
 
     counts = {cat: int((kunden_basis["Kategorie"] == cat).sum()) for cat in KATEGORIEN if cat != "Alle"}
     counts["Alle"] = int(len(kunden_basis))
@@ -837,6 +906,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> st
     csb_nr = normalize_text(customer.get("CSB_Nr", ""))
     fachberater = normalize_text(customer.get("Fachberater", ""))
     tourengruppe = normalize_text(customer.get("Tourengruppe", ""))
+    kostenstelle = normalize_text(customer.get("Kostenstelle", ""))
     leiter = normalize_text(customer.get("Leiter", ""))
 
     verladetor = ""
@@ -845,10 +915,12 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> st
     if not customer_rows.empty:
         verladetor_series = customer_rows["Verladetor"].dropna().astype(str).str.strip()
         rahmentour_series = customer_rows["Rahmentour_Raw"].dropna().astype(str).str.strip()
-        if not verladetor_series.empty:
-            verladetor = normalize_text(verladetor_series.iloc[0])
-        if not rahmentour_series.empty:
-            rahmentour = normalize_text(rahmentour_series.iloc[0])
+        non_empty_verladetor = verladetor_series[verladetor_series != ""]
+        non_empty_rahmentour = rahmentour_series[rahmentour_series != ""]
+        if not non_empty_verladetor.empty:
+            verladetor = normalize_text(non_empty_verladetor.iloc[0])
+        if not non_empty_rahmentour.empty:
+            rahmentour = normalize_text(non_empty_rahmentour.iloc[0])
 
     return f"""
     <div class="paper">
@@ -872,6 +944,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> st
             <div class="meta-card"><span class="meta-label">Adresse</span><span class="meta-value">{html.escape(address)}</span></div>
             <div class="meta-card"><span class="meta-label">PLZ / Ort</span><span class="meta-value">{html.escape(plz_ort)}</span></div>
             <div class="meta-card"><span class="meta-label">Tourengruppe</span><span class="meta-value">{html.escape(tourengruppe)}</span></div>
+            <div class="meta-card"><span class="meta-label">Kostenstelle</span><span class="meta-value">{html.escape(kostenstelle)}</span></div>
             <div class="meta-card"><span class="meta-label">Leiter</span><span class="meta-value">{html.escape(leiter)}</span></div>
         </div>
 
@@ -1129,7 +1202,7 @@ def show_onboarding(upload_map: Dict[str, Optional[object]]) -> None:
                 <li>SAP-Datei: A, H, I, O, Y</li>
                 <li>Transportgruppen: A, C</li>
                 <li>Kisoft: SAP Rahmentour, CSB Tournummer, Verladetor</li>
-                <li>Kostenstellen: sap_von, sap_bis, tourengruppe, leiter</li>
+                <li>Kostenstellen: A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter</li>
             </ul>
             """,
         )
@@ -1149,6 +1222,7 @@ def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> N
         st.markdown("#### Eckdaten")
         st.write(f"**Kategorie:** {normalize_text(customer.get('Kategorie', '')) or '-'}")
         st.write(f"**Tourengruppe:** {normalize_text(customer.get('Tourengruppe', '')) or '-'}")
+        st.write(f"**Kostenstelle:** {normalize_text(customer.get('Kostenstelle', '')) or '-'}")
         st.write(f"**Leiter:** {normalize_text(customer.get('Leiter', '')) or '-'}")
 
     info_cols = st.columns(4)
