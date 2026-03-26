@@ -922,25 +922,12 @@ def export_css() -> str:
         ══════════════════════════════════════ */
         .paper {
             width: 210mm;
-            height: 297mm;
             min-height: 297mm;
             margin: 0 auto 20px auto;
             background: #fff;
             box-shadow: 0 4px 24px rgba(0,0,0,0.18);
-            padding: 11mm 10.5mm 12mm 10.5mm;
+            padding: 12mm 13mm 14mm 13mm;
             position: relative;
-            overflow: hidden;
-        }
-        .paper-scale-frame {
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            position: relative;
-        }
-        .paper-content {
-            transform-origin: top left;
-            transform: scale(var(--paper-scale, 1));
-            width: 100%;
         }
 
         /* ══════════════════════════════════════
@@ -948,38 +935,38 @@ def export_css() -> str:
         ══════════════════════════════════════ */
         .doc-header {
             display: grid;
-            grid-template-columns: 42mm 1fr 52mm;
-            gap: 4mm;
-            align-items: start;
-            margin-bottom: 6mm;
+            grid-template-columns: 52mm 1fr 44mm;
+            gap: 3mm;
+            align-items: flex-start;
+            margin-bottom: 4mm;
+            padding-bottom: 3mm;
         }
         .doc-address {
-            font-size: 8.8pt;
-            line-height: 1.55;
-            padding-top: 1.5mm;
+            font-size: 9pt;
+            line-height: 1.5;
         }
         .doc-address strong {
-            font-size: 9.2pt;
+            font-size: 9.5pt;
             font-weight: 700;
             display: block;
-            margin-bottom: 1.5mm;
+            margin-bottom: 0.5mm;
         }
         .doc-title-block {
             text-align: center;
-            padding: 1mm 4mm 0 4mm;
+            padding: 0 4mm;
         }
         .doc-title {
-            font-size: 17pt;
+            font-size: 20pt;
             font-weight: 700;
             letter-spacing: -0.01em;
             line-height: 1.1;
-            margin-bottom: 1.2mm;
+            margin-bottom: 1mm;
         }
         .doc-subtitle {
-            font-size: 9.5pt;
-            font-weight: 400;
-            color: #333;
-            margin-bottom: 0;
+            font-size: 14pt;
+            font-weight: 700;
+            color: #cc0000;
+            margin-bottom: 1.5mm;
         }
         .doc-allsortiments {
             font-size: 8.5pt;
@@ -987,17 +974,16 @@ def export_css() -> str:
         }
         .doc-logo {
             text-align: right;
-            padding-top: 0.5mm;
         }
 
         /* ══════════════════════════════════════
            INFOLEISTE
         ══════════════════════════════════════ */
         .doc-infobar {
-            font-size: 9.2pt;
-            margin: 5mm 0 4mm 0;
-            padding-top: 0;
-            border-top: none;
+            font-size: 9.5pt;
+            margin: 3.5mm 0 4mm 0;
+            padding-top: 2.5mm;
+            border-top: 1px solid #ccc;
         }
         .doc-infobar strong { font-weight: 700; }
 
@@ -1005,21 +991,22 @@ def export_css() -> str:
            TOUR-ÜBERSICHT
         ══════════════════════════════════════ */
         .tour-overview {
-            width: auto;
-            border-collapse: separate;
-            border-spacing: 0;
-            font-size: 9.3pt;
-            margin: 0 0 4.5mm 0;
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 9pt;
+            margin-bottom: 4mm;
         }
         .tour-overview td {
-            padding: 0 5.5mm 1.2mm 0;
+            border: 1px solid #aaa;
+            padding: 1.0mm 2.3mm;
             white-space: nowrap;
-            vertical-align: top;
-            font-weight: 700;
+            line-height: 1.15;
         }
-        .tour-overview td.tour-label {
-            padding-right: 6.5mm;
+        .tour-overview tr:first-child td { font-weight: 700; }
+        .tour-overview td:first-child {
             font-weight: 700;
+            background: #f0f0f0;
+            width: 20mm;
         }
 
         /* ══════════════════════════════════════
@@ -1028,48 +1015,39 @@ def export_css() -> str:
         .plan-table {
             width: 100%;
             border-collapse: collapse;
+            border: 1.5px solid #999;
             font-size: 9pt;
-            border: 1px solid #b7b7b7;
         }
-        .plan-table th {
-            background: #f7f7f7;
-            border: 1px solid #b7b7b7;
-            padding: 2.1mm 3mm;
+        .plan-table thead th {
+            border: 1px solid #999;
+            padding: 1.7mm 2.3mm;
             text-align: left;
-            font-size: 9pt;
             font-weight: 700;
+            background: #fff;
+            font-size: 9.5pt;
+            line-height: 1.1;
         }
-        .plan-table td {
-            border-left: 1px solid #b7b7b7;
-            border-right: 1px solid #b7b7b7;
-            padding: 1.6mm 3mm;
+        .plan-table tbody td {
+            border: 1px solid #bbb;
+            padding: 1.1mm 2.3mm;
+            vertical-align: top;
+            line-height: 1.12;
+        }
+        .plan-table tr.day-start td {
+            border-top: 1.5px solid #888;
+        }
+        .plan-table td.liefertag-cell {
+            font-weight: 700;
+            width: 22mm;
+            white-space: nowrap;
             vertical-align: top;
         }
-        .plan-table tbody tr.group-start td {
-            border-top: 2px solid #b7b7b7;
-        }
-        .plan-table tbody tr:first-child td {
-            border-top: 1px solid #b7b7b7;
-        }
-        .plan-table tbody tr:last-child td {
-            border-bottom: 1px solid #b7b7b7;
-        }
-        .plan-table td.day-cell {
-            width: 30mm;
-            font-weight: 700;
-            white-space: nowrap;
-            background: #fff;
-            padding-top: 3mm;
-        }
-        .plan-table td.sortiment-cell {
-            width: auto;
-        }
         .plan-table td.bestelltag-cell {
-            width: 26mm;
+            width: 24mm;
             white-space: nowrap;
         }
         .plan-table td.zeit-cell {
-            width: 30mm;
+            width: 26mm;
             white-space: nowrap;
         }
 
@@ -1141,19 +1119,13 @@ def export_css() -> str:
 
             .paper {
                 width: 210mm !important;
-                height: 297mm !important;
-                min-height: 297mm !important;
-                max-height: 297mm !important;
+                min-height: 0 !important;
+                max-height: none !important;
                 margin: 0 !important;
-                padding: 11mm 10.5mm 12mm 10.5mm !important;
+                padding: 10mm 12mm !important;
                 box-shadow: none !important;
                 border-radius: 0 !important;
                 page-break-inside: avoid;
-                overflow: hidden !important;
-            }
-            .paper-scale-frame {
-                height: 100% !important;
-                overflow: hidden !important;
             }
 
             .is-match, .is-current { outline: none !important; }
@@ -1163,34 +1135,35 @@ def export_css() -> str:
 
 
 def render_tour_overview(customer_rows: pd.DataFrame) -> str:
-    """Baut die Tourübersicht-Tabelle im Layout der Vorlage."""
+    """Baut die Tourübersicht-Tabelle: Liefertag -> CSB-Tournummer, nach PDF-Vorbild."""
     if customer_rows.empty:
         return ""
 
+    # Pro Liefertag die eindeutigen CSB-Tournummern sammeln (sortiert nach Wochentag-Reihenfolge)
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
-    tour_by_day: Dict[str, str] = {}
-
+    tour_by_day: dict = {}
     for _, row in customer_rows.iterrows():
         day = normalize_text(row.get("Liefertag", ""))
         csb = normalize_text(row.get("CSB Tournummer", ""))
         if day and csb and day not in tour_by_day:
             tour_by_day[day] = csb
 
-    days_present = [day for day in day_order if day in tour_by_day]
-    if not days_present:
+    if not tour_by_day:
         return ""
 
-    day_cells = "".join(f"<td>{html.escape(day)}</td>" for day in days_present)
-    tour_cells = "".join(f"<td>{html.escape(tour_by_day[day])}</td>" for day in days_present)
+    days_present = [d for d in day_order if d in tour_by_day]
+
+    day_cells  = "".join(f"<td>{html.escape(d)}</td>" for d in days_present)
+    tour_cells = "".join(f"<td>{html.escape(tour_by_day[d])}</td>" for d in days_present)
 
     return f"""
     <table class="tour-overview">
         <tr>
-            <td class="tour-label">Liefertag:</td>
+            <td>Liefertag:</td>
             {day_cells}
         </tr>
         <tr>
-            <td class="tour-label">Tour:</td>
+            <td>Tour:</td>
             {tour_cells}
         </tr>
     </table>
@@ -1198,12 +1171,14 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
 
 
 def render_plan_table(rows: pd.DataFrame) -> str:
-    """Rendert die Plantabelle im einheitlichen Vorlagen-Layout."""
+    """Haupttabelle: Liefertag (rowspan) | Sortiment | Bestelltag | Bestellzeitende.
+    Entspricht exakt dem PDF-Vorbild: Liefertag-Zelle nur einmal pro Tag, fett."""
     if rows.empty:
         return "<p>Keine Planzeilen vorhanden.</p>"
 
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag", "Unbekannt"]
 
+    # Sortieren: erst nach Liefertag (Wochentag-Reihenfolge), dann Sortiment
     def day_sort_key(day: str) -> int:
         try:
             return day_order.index(day)
@@ -1211,60 +1186,69 @@ def render_plan_table(rows: pd.DataFrame) -> str:
             return 99
 
     def time_to_minutes(t: str) -> int:
+        """'20:00' -> 1200, '09:15' -> 555, '' -> 9999"""
         try:
-            clean = normalize_text(t).replace(" Uhr", "").strip()
+            clean = t.replace(" Uhr", "").strip()
             h, m = clean.split(":")
             return int(h) * 60 + int(m)
         except Exception:
             return 9999
 
     ordered = rows.copy()
-    ordered["_day_order"] = ordered["Liefertag"].map(day_sort_key)
-    ordered["_time_order"] = ordered["Bestellzeitende"].map(time_to_minutes)
+    ordered["_day_order"]  = ordered["Liefertag"].map(day_sort_key)
+    ordered["_time_order"] = ordered["Bestellzeitende"].map(normalize_text).map(time_to_minutes)
     ordered = ordered.sort_values(["_day_order", "SortKey_Sortiment", "_time_order"], ascending=[True, True, False])
 
-    body_parts: List[str] = []
-    for day in day_order:
-        day_rows = ordered[ordered["Liefertag"].map(normalize_text) == day]
-        if day_rows.empty:
-            continue
+    # Rowspan pro Liefertag zählen
+    day_counts: dict = {}
+    for _, row in ordered.iterrows():
+        d = normalize_text(row.get("Liefertag", "Unbekannt"))
+        day_counts[d] = day_counts.get(d, 0) + 1
 
-        row_count = len(day_rows)
-        first_row = True
-        for _, row in day_rows.iterrows():
-            sortiment = normalize_text(row.get("Sortiment", ""))
-            bestelltag = normalize_text(row.get("Bestelltag_Name", ""))
-            zeitende = normalize_text(row.get("Bestellzeitende", ""))
-            if zeitende and "uhr" not in zeitende.lower():
-                zeitende = zeitende + " Uhr"
+    body_rows: list = []
+    day_seen: set = set()
 
-            day_cell = ""
-            row_class = "group-start" if first_row else ""
-            if first_row:
-                day_cell = f'<td class="day-cell" rowspan="{row_count}">{html.escape(day)}</td>'
-                first_row = False
+    for i, (_, row) in enumerate(ordered.iterrows()):
+        day        = normalize_text(row.get("Liefertag", "Unbekannt"))
+        sortiment  = normalize_text(row.get("Sortiment", ""))
+        bestelltag = normalize_text(row.get("Bestelltag_Name", ""))
+        zeitende   = normalize_text(row.get("Bestellzeitende", ""))
 
-            body_parts.append(
-                f"""<tr class=\"{row_class}\">
-                    {day_cell}
-                    <td class=\"sortiment-cell\">{html.escape(sortiment)}</td>
-                    <td class=\"bestelltag-cell\">{html.escape(bestelltag)}</td>
-                    <td class=\"zeit-cell\">{html.escape(zeitende)}</td>
-                </tr>"""
-            )
+        # "Uhr" anhängen falls nicht schon vorhanden
+        if zeitende and "uhr" not in zeitende.lower():
+            zeitende = zeitende + " Uhr"
+
+        is_day_start = day not in day_seen
+        day_seen.add(day)
+
+        day_cell = ""
+        if is_day_start:
+            rowspan = day_counts[day]
+            day_cell = f'<td class="liefertag-cell" rowspan="{rowspan}">{html.escape(day)}</td>'
+
+        tr_class = ' class="day-start"' if is_day_start else ""
+
+        body_rows.append(
+            f"""<tr{tr_class}>
+                {day_cell}
+                <td class="sortiment-cell">{html.escape(sortiment)}</td>
+                <td class="bestelltag-cell">{html.escape(bestelltag)}</td>
+                <td class="zeit-cell">{html.escape(zeitende)}</td>
+            </tr>"""
+        )
 
     return f"""
     <table class="plan-table">
         <thead>
             <tr>
-                <th style="width:30mm;">Liefertag</th>
+                <th style="width:20mm;">Liefertag</th>
                 <th>Sortiment</th>
-                <th style="width:26mm;">Bestelltag</th>
-                <th style="width:30mm;">Bestellzeitende</th>
+                <th style="width:22mm;">Bestelltag</th>
+                <th style="width:24mm;">Bestellzeitende</th>
             </tr>
         </thead>
         <tbody>
-            {''.join(body_parts)}
+            {"".join(body_rows)}
         </tbody>
     </table>
     """
@@ -1306,60 +1290,67 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     leiter       = normalize_text(customer.get("Leiter", ""))
     stand = datetime.now().strftime("%d.%m.%Y")
 
-    # Untertitel im Stil der Vorlage
+    # Tourengruppe -> Subtitle (Standart / NMS / Malchow / MK …)
     kategorie = normalize_text(customer.get("Kategorie", ""))
     subtitle_map = {
-        "Direkt": "Alle Sortimente Fleischwerk",
-        "NMS": "Alle Sortimente Fleischwerk",
-        "Malchow": "Alle Sortimente Fleischwerk",
-        "MK": "Alle Sortimente Fleischwerk",
+        "Direkt": "Standart",
+        "NMS":    "NMS",
+        "Malchow":"Malchow",
+        "MK":     "MK",
     }
-    subtitle = subtitle_map.get(kategorie, "Alle Sortimente Fleischwerk")
+    subtitle = subtitle_map.get(kategorie, kategorie or "Standart")
+
+    # Zusatzinfo unterhalb Subtitle
+    info_parts = []
+    if tourengruppe:
+        info_parts.append(tourengruppe)
+    if kostenstelle:
+        info_parts.append(f"Kostenstelle {kostenstelle}")
+    if leiter:
+        info_parts.append(f"Leiter {leiter}")
+    allsortiments_line = " &mdash; ".join(info_parts) if info_parts else "Alle Sortimente Fleischwerk"
 
     tour_overview_html = render_tour_overview(customer_rows)
     plan_table_html    = render_plan_table(customer_rows)
 
-    # Kunden-Nr. im Ausdruck immer als SAP-Nummer anzeigen
-    kunden_nr = sap_nr
+    # Kunden-Nr. = CSB-Nummer (4-stellig) ohne führende Null/langen SAP-Key
+    kunden_nr = csb_nr if csb_nr else sap_nr
 
     return f"""
-    <div class="paper" data-autofit="a4">
-        <div class="paper-scale-frame">
-            <div class="paper-content">
+    <div class="paper">
 
-                <!-- ===== HEADER: Adresse | Titel | Logo ===== -->
-                <div class="doc-header">
-                    <div class="doc-address">
-                        <strong>{html.escape(name)}</strong><br>
-                        {html.escape(strasse)}<br>
-                        {html.escape(plz)} {html.escape(ort)}
-                    </div>
+        <!-- ===== HEADER: Adresse | Titel | Logo ===== -->
+        <div class="doc-header">
+            <div class="doc-address">
+                <strong>{html.escape(name)}</strong><br>
+                {html.escape(strasse)}<br>
+                {html.escape(plz)} {html.escape(ort)}
+            </div>
 
-                    <div class="doc-title-block">
-                        <div class="doc-title">Sende- &amp; Belieferungsplan</div>
-                        <div class="doc-subtitle">{html.escape(subtitle)}</div>
-                    </div>
+            <div class="doc-title-block">
+                <div class="doc-title">Sende- &amp; Belieferungsplan</div>
+                <div class="doc-subtitle">{html.escape(subtitle)}</div>
+                <div class="doc-allsortiments">{allsortiments_line}</div>
+            </div>
 
-                    <div class="doc-logo">
-                        {logo_img_tag(logo_b64, logo_mime)}
-                    </div>
-                </div>
-
-                <!-- ===== INFOLEISTE ===== -->
-                <div class="doc-infobar">
-                    <strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}&nbsp;&nbsp;&nbsp;
-                    <strong>Fachberater:</strong> {html.escape(fachberater)}&nbsp;&nbsp;&nbsp;
-                    <strong>Stand:</strong> {html.escape(stand)}
-                </div>
-
-                <!-- ===== TOUR-ÜBERSICHT ===== -->
-                {tour_overview_html}
-
-                <!-- ===== PLANTABELLE ===== -->
-                {plan_table_html}
-
+            <div class="doc-logo">
+                {logo_img_tag(logo_b64, logo_mime)}
             </div>
         </div>
+
+        <!-- ===== INFOLEISTE ===== -->
+        <div class="doc-infobar">
+            <strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}&nbsp;&nbsp;&nbsp;
+            <strong>Fachberater:</strong> {html.escape(fachberater)}&nbsp;&nbsp;&nbsp;
+            <strong>Stand:</strong> {html.escape(stand)}
+        </div>
+
+        <!-- ===== TOUR-ÜBERSICHT ===== -->
+        {tour_overview_html}
+
+        <!-- ===== PLANTABELLE ===== -->
+        {plan_table_html}
+
     </div>
     """
 
@@ -1459,38 +1450,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         var matches    = [];
         var cursor     = -1;
 
-        function fitPaper(paper) {
-            if (!paper) return;
-            var frame = paper.querySelector(".paper-scale-frame");
-            var content = paper.querySelector(".paper-content");
-            if (!frame || !content) return;
-
-            paper.style.setProperty("--paper-scale", "1");
-            content.style.width = "100%";
-
-            var frameHeight = frame.clientHeight || (paper.clientHeight
-                - parseFloat(getComputedStyle(paper).paddingTop || 0)
-                - parseFloat(getComputedStyle(paper).paddingBottom || 0));
-            var frameWidth = frame.clientWidth || (paper.clientWidth
-                - parseFloat(getComputedStyle(paper).paddingLeft || 0)
-                - parseFloat(getComputedStyle(paper).paddingRight || 0));
-
-            var contentHeight = content.scrollHeight;
-            var contentWidth = content.scrollWidth;
-
-            if (!frameHeight || !frameWidth || !contentHeight || !contentWidth) return;
-
-            var scale = Math.min(1, frameHeight / contentHeight, frameWidth / contentWidth);
-            if (!isFinite(scale) || scale <= 0) scale = 1;
-
-            paper.style.setProperty("--paper-scale", String(scale));
-            content.style.width = scale < 1 ? (100 / scale).toFixed(4) + "%" : "100%";
-        }
-
-        function fitAllPapers() {
-            document.querySelectorAll('.paper[data-autofit="a4"]').forEach(fitPaper);
-        }
-
         function norm(s) {
             return (s || "").toLowerCase()
                 .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -1587,7 +1546,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         document.addEventListener("DOMContentLoaded", function () {
             allEntries = Array.from(document.querySelectorAll(".customer-entry"));
-            fitAllPapers();
 
             document.getElementById("search-input").addEventListener("input",   runSearch);
             document.getElementById("btn-next").addEventListener("click",  function () { step(1); });
@@ -1598,11 +1556,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (e.key === "Enter")  { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
                 if (e.key === "Escape") { resetSearch(); }
             });
-
-            window.addEventListener("resize", fitAllPapers);
-            window.addEventListener("beforeprint", fitAllPapers);
-            setTimeout(fitAllPapers, 50);
-            setTimeout(fitAllPapers, 250);
 
             updateCount();
         });
