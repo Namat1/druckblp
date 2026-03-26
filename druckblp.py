@@ -647,7 +647,24 @@ def prepare_dataframes(
     plan_rows["CSB Tournummer"] = plan_rows["CSB Tournummer"].fillna("")
     plan_rows["Verladetor"] = plan_rows["Verladetor"].fillna("")
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
-    plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("")
+    # Sortiment-Priorität: Fleisch/Heidemark zuerst, CSB-Kram zuletzt
+    _SORTIMENT_PRIO = {
+        "fleisch- & wurst bedienung": 0,
+        "fleisch- & wurst sb":        1,
+        "heidemark":                  2,
+    }
+    def _sortiment_key(name: str) -> tuple:
+        n = str(name).strip().lower()
+        # CSB-Kram (AVO, Werbemittel, Hamburger Jungs) ans Ende
+        if any(k in n for k in ("avo", "werbemittel", "hamburger jungs")):
+            return (9, name)
+        # Prioritäts-Sortimente ganz vorne
+        for key, prio in _SORTIMENT_PRIO.items():
+            if key in n:
+                return (prio, name)
+        # Alles andere in der Mitte (alphabetisch)
+        return (5, name)
+    plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("").map(_sortiment_key)
 
     # Kostenstellen-Lookup auf plan_rows (CSB-Tournummer ist jetzt verfuegbar)
     plan_rows = apply_kostenstellen_lookup(plan_rows, df_kostenstellen)
