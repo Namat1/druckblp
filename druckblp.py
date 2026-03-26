@@ -1179,7 +1179,7 @@ def render_plan_table(rows: pd.DataFrame) -> str:
     ordered = rows.copy()
     ordered["_day_order"]  = ordered["Liefertag"].map(day_sort_key)
     ordered["_time_order"] = ordered["Bestellzeitende"].map(normalize_text).map(time_to_minutes)
-    ordered = ordered.sort_values(["_day_order", "_time_order", "SortKey_Sortiment"])
+    ordered = ordered.sort_values(["_day_order", "_time_order", "SortKey_Sortiment"], ascending=[True, False, True])
 
     # Rowspan pro Liefertag zählen
     day_counts: dict = {}
