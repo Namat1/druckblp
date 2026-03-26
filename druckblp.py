@@ -1142,17 +1142,7 @@ def main() -> None:
             st.session_state.selected_sap = ""
 
         st.divider()
-        st.subheader("HTML-Export")
-        export_html = build_full_document_html(filtered_customers, plan_rows_df, include_separators=True)
-        filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
-
-        st.download_button(
-            label="HTML-Datei herunterladen",
-            data=export_html,
-            file_name=f"sendeplan_{filename_suffix}.html",
-            mime="text/html",
-            use_container_width=True,
-        )
+        st.caption("Der HTML-Download erscheint zusätzlich groß im Hauptbereich, sobald ein Kunde geladen ist.")
 
     main_col, info_col = st.columns([5, 2], gap="large")
 
@@ -1191,6 +1181,27 @@ def main() -> None:
 
             single_html = build_single_document_html(selected_customer, customer_rows)
             bulk_html = build_full_document_html(filtered_customers, plan_rows_df, include_separators=True)
+            filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
+            selected_suffix = normalize_text(selected_customer.get("SAP_Nr", "kunde")) or "kunde"
+
+            st.subheader("HTML-Export")
+            download_col1, download_col2 = st.columns(2)
+            with download_col1:
+                st.download_button(
+                    label="Aktuellen Kunden als HTML herunterladen",
+                    data=single_html,
+                    file_name=f"sendeplan_{selected_suffix}.html",
+                    mime="text/html",
+                    use_container_width=True,
+                )
+            with download_col2:
+                st.download_button(
+                    label="Gefilterten Gesamtplan als HTML herunterladen",
+                    data=bulk_html,
+                    file_name=f"sendeplan_{filename_suffix}.html",
+                    mime="text/html",
+                    use_container_width=True,
+                )
 
             st.markdown(
                 "<div class='print-note'>Einzeldruck und Massendruck öffnen ein separates HTML-Dokument mit A4-Layout und starten dort den Browser-Druck.</div>",
