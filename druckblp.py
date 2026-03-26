@@ -894,6 +894,73 @@ def app_css() -> str:
             margin-bottom: 0.6rem;
         }
 
+        .export-search-shell {
+            max-width: 210mm;
+            margin: 0.9rem auto 1rem auto;
+            padding: 0;
+        }
+
+        .export-searchbar {
+            display: flex;
+            gap: 0.8rem;
+            flex-wrap: wrap;
+            align-items: end;
+            background: #ffffff;
+            border: 1px solid #cfd8e3;
+            border-radius: 10px;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+            padding: 0.9rem 1rem;
+        }
+
+        .export-search-field {
+            flex: 1 1 220px;
+        }
+
+        .export-search-field label {
+            display: block;
+            font-size: 0.84rem;
+            color: #526173;
+            margin-bottom: 0.25rem;
+            font-weight: 600;
+        }
+
+        .export-search-field input {
+            width: 100%;
+            border: 1px solid #aab7c6;
+            border-radius: 8px;
+            padding: 0.62rem 0.75rem;
+            font-size: 0.97rem;
+            color: #16202a;
+            background: #ffffff;
+            box-sizing: border-box;
+        }
+
+        .export-search-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .export-search-actions button {
+            border: 1px solid #8ea4b8;
+            background: #ffffff;
+            color: #16202a;
+            border-radius: 8px;
+            padding: 0.62rem 0.9rem;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .export-search-status {
+            margin-top: 0.45rem;
+            font-size: 0.9rem;
+            color: #526173;
+        }
+
+        .customer-export-group {
+            display: block;
+        }
+
         @page {
             size: A4 portrait;
             margin: 10mm;
@@ -908,7 +975,8 @@ def app_css() -> str:
             [data-testid="stStatusWidget"],
             .stDeployButton,
             .print-toolbar,
-            .print-note {
+            .print-note,
+            .export-search-shell {
                 display: none !important;
                 visibility: hidden !important;
             }
@@ -1112,24 +1180,103 @@ def render_separator_page(customer: pd.Series) -> str:
     """
 
 
+def build_export_search_toolbar() -> str:
+    return """
+    <div class="export-search-shell">
+        <div class="export-searchbar">
+            <div class="export-search-field">
+                <label for="sapSearch">SAP-Nummer</label>
+                <input id="sapSearch" type="text" placeholder="Zum Beispiel 211393" oninput="filterExportDocs()" />
+            </div>
+            <div class="export-search-field">
+                <label for="csbSearch">CSB-Nummer oder CSB-Tour</label>
+                <input id="csbSearch" type="text" placeholder="Zum Beispiel 13938 oder 1064" oninput="filterExportDocs()" />
+            </div>
+            <div class="export-search-actions">
+                <button type="button" onclick="resetExportFilter()">Zurücksetzen</button>
+            </div>
+        </div>
+        <div id="exportSearchStatus" class="export-search-status"></div>
+    </div>
+    <script>
+        function normalizeSearchText(value) {
+            return (value || '').toString().toLowerCase().replace(/\\s+/g, ' ').trim();
+        }
+
+        function filterExportDocs() {
+            const sapNeedle = normalizeSearchText(document.getElementById('sapSearch')?.value || '');
+            const csbNeedle = normalizeSearchText(document.getElementById('csbSearch')?.value || '');
+            const groups = Array.from(document.querySelectorAll('.customer-export-group'));
+            let visible = 0;
+
+            groups.forEach((group) => {
+                const sapHaystack = normalizeSearchText(group.getAttribute('data-sap-search') || '');
+                const csbHaystack = normalizeSearchText(group.getAttribute('data-csb-search') || '');
+                const sapMatch = !sapNeedle || sapHaystack.includes(sapNeedle);
+                const csbMatch = !csbNeedle || csbHaystack.includes(csbNeedle);
+                const show = sapMatch && csbMatch;
+                group.style.display = show ? 'block' : 'none';
+                if (show) {
+                    visible += 1;
+                }
+            });
+
+            const status = document.getElementById('exportSearchStatus');
+            if (!status) {
+                return;
+            }
+
+            if (!sapNeedle && !csbNeedle) {
+                status.textContent = `${visible} Kunden sichtbar`;
+                return;
+            }
+            status.textContent = `${visible} Kunden passend zum Suchfilter`;
+        }
+
+        function resetExportFilter() {
+            const sap = document.getElementById('sapSearch');
+            const csb = document.getElementById('csbSearch');
+            if (sap) sap.value = '';
+            if (csb) csb.value = '';
+            filterExportDocs();
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            filterExportDocs();
+        });
+    </script>
+    """
+
+
 def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, df_kostenplan: pd.DataFrame, include_separators: bool = True) -> str:
     docs: List[str] = [
+        build_export_search_toolbar(),
         render_cover_page(
             title="Sendeplan-Generator",
             subtitle="Gesamtplan",
             lines=[
                 f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr",
                 f"Kundenanzahl: {len(customers)}",
-                "Enthält Deckblatt, optionale Zwischenseiten und Kundenseiten.",
+                "Die HTML-Datei ist nach SAP-Nummer sowie CSB-Nummer oder CSB-Tour filterbar.",
             ],
         )
     ]
 
     for _, customer in customers.iterrows():
         customer_rows = plan_rows[plan_rows["SAP_Nr"] == customer["SAP_Nr"]].copy()
+        csb_touren = sorted({normalize_text(v) for v in customer_rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist() if normalize_text(v)})
+        csb_search = " ".join(filter(None, [normalize_text(customer.get("CSB_Nr", "")), " ".join(csb_touren)]))
+        group_parts: List[str] = []
         if include_separators:
-            docs.append(render_separator_page(customer))
-        docs.append(render_customer_plan(customer, customer_rows, df_kostenplan))
+            group_parts.append(render_separator_page(customer))
+        group_parts.append(render_customer_plan(customer, customer_rows, df_kostenplan))
+        docs.append(
+            f"""
+            <section class="customer-export-group" data-sap-search="{html.escape(normalize_text(customer.get('SAP_Nr', '')))}" data-csb-search="{html.escape(csb_search)}">
+                {''.join(group_parts)}
+            </section>
+            """
+        )
 
     return f"""
     <!DOCTYPE html>
