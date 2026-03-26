@@ -611,16 +611,18 @@ def prepare_dataframes(
     df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID"], keep="first").copy()
 
     def infer_liefertag(row: pd.Series) -> str:
-        # 1. Wochentag direkt aus Kisoft (zuverlaessigste Quelle)
-        wochentag = normalize_text(row.get("Wochentag", ""))
-        if wochentag and wochentag.lower() not in ("", "nan"):
-            return wochentag.capitalize()
-        # 2. Erste Ziffer der CSB-Tournummer = Liefertag
+        # 1. Erste Ziffer der CSB-Tournummer = Liefertag
         csb_tour = normalize_digits(row.get("CSB Tournummer", ""))
         if csb_tour and csb_tour[0].isdigit():
             day = int(csb_tour[0])
             if day in WOCHENTAGE:
                 return WOCHENTAGE[day]
+
+        # 2. Wochentag direkt aus Kisoft
+        wochentag = normalize_text(row.get("Wochentag", ""))
+        if wochentag and wochentag.lower() not in ("", "nan"):
+            return wochentag.capitalize()
+
         # 3. Fallback: Bestelltag aus SAP
         return row.get("Bestelltag_Name", "Unbekannt")
 
