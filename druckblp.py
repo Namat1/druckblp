@@ -423,20 +423,110 @@ def app_css() -> str:
     return """
     <style>
         :root {
+            --page-bg: #f3f5f8;
+            --card-bg: #ffffff;
+            --sidebar-bg: #e9edf3;
+            --border-color: #cfd6df;
+            --text-main: #1f2933;
+            --text-soft: #5b6773;
+            --accent: #1f4e79;
+            --accent-soft: #e9f1f8;
             --paper-width: 210mm;
             --paper-min-height: 297mm;
-            --border-color: #aaaaaa;
-            --muted: #5f6b76;
-            --accent: #1f4e79;
         }
 
         .stApp {
-            background: linear-gradient(180deg, #eef2f7 0%, #f7f9fb 100%);
+            background: var(--page-bg);
+            color: var(--text-main);
+        }
+
+        .block-container {
+            max-width: 1500px;
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+
+        h1, h2, h3, h4, h5, h6,
+        p, li, label, span, div {
+            color: var(--text-main);
         }
 
         section[data-testid="stSidebar"] {
-            background: #f7f9fc;
-            border-right: 1px solid #d9e0e7;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+        }
+
+        section[data-testid="stSidebar"] * {
+            color: var(--text-main) !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"],
+        [data-testid="stSidebar"] [data-baseweb="input"],
+        [data-testid="stSidebar"] [data-baseweb="select"],
+        [data-testid="stSidebar"] button,
+        [data-testid="stSidebar"] .stTextInput input {
+            background: #ffffff !important;
+            color: var(--text-main) !important;
+            border-color: var(--border-color) !important;
+        }
+
+        [data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+            border: 1px dashed #9fb0c2 !important;
+            border-radius: 14px !important;
+        }
+
+        [data-testid="stMetric"] {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 0.9rem 1rem;
+        }
+
+        .app-hero,
+        .app-card,
+        .empty-state {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 18px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .app-hero {
+            padding: 1.5rem 1.6rem;
+            margin-bottom: 1rem;
+        }
+
+        .app-hero h1 {
+            margin: 0 0 0.35rem 0;
+            color: var(--accent);
+            font-size: 2rem;
+            line-height: 1.1;
+        }
+
+        .app-hero p {
+            margin: 0;
+            color: var(--text-soft);
+            font-size: 1rem;
+        }
+
+        .app-card {
+            padding: 1.2rem 1.3rem;
+        }
+
+        .app-card h3 {
+            margin-top: 0;
+            margin-bottom: 0.75rem;
+            color: var(--accent);
+        }
+
+        .status-list {
+            margin: 0;
+            padding-left: 1.1rem;
+        }
+
+        .status-list li {
+            margin: 0.35rem 0;
+            color: var(--text-soft);
         }
 
         .paper {
@@ -470,7 +560,7 @@ def app_css() -> str:
 
         .paper-subtitle {
             font-size: 10pt;
-            color: var(--muted);
+            color: var(--text-soft);
             margin-top: 2mm;
         }
 
@@ -491,7 +581,7 @@ def app_css() -> str:
         .meta-label {
             display: block;
             font-size: 8.5pt;
-            color: var(--muted);
+            color: var(--text-soft);
             text-transform: uppercase;
             letter-spacing: 0.04em;
             margin-bottom: 1mm;
@@ -501,6 +591,7 @@ def app_css() -> str:
             display: block;
             font-size: 11pt;
             font-weight: 600;
+            color: #222;
         }
 
         .plan-table {
@@ -517,6 +608,7 @@ def app_css() -> str:
             padding: 2.5mm 2mm;
             text-align: left;
             vertical-align: top;
+            color: #222;
         }
 
         .plan-table th {
@@ -559,7 +651,7 @@ def app_css() -> str:
         .cover-page p,
         .separator-page p {
             font-size: 11pt;
-            color: var(--muted);
+            color: var(--text-soft);
             margin: 1.5mm 0;
         }
 
@@ -572,7 +664,7 @@ def app_css() -> str:
         }
 
         .print-note {
-            color: #51606f;
+            color: var(--text-soft);
             font-size: 0.92rem;
             text-align: center;
             margin-bottom: 1rem;
@@ -580,14 +672,20 @@ def app_css() -> str:
 
         .empty-state {
             width: 100%;
-            max-width: var(--paper-width);
+            max-width: 980px;
             margin: 0 auto;
-            background: white;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
-            border-radius: 8px;
-            padding: 30px;
-            text-align: center;
-            color: #5f6b76;
+            padding: 1.6rem;
+            text-align: left;
+        }
+
+        .empty-state h3 {
+            margin-top: 0;
+            color: var(--accent);
+        }
+
+        .empty-state p,
+        .empty-state li {
+            color: var(--text-soft);
         }
 
         @page {
@@ -856,12 +954,63 @@ def all_required_uploads_present(upload_map: Dict[str, Optional[st.runtime.uploa
     return all(upload_map.values())
 
 
+def render_upload_waiting_screen(upload_map: Dict[str, Optional[st.runtime.uploaded_file_manager.UploadedFile]]) -> None:
+    status_lines = []
+    labels = {
+        "kunden": "Kundenliste",
+        "sap": "SAP-Datei",
+        "transport": "Transportgruppen",
+        "kisoft": "Kisoft-Datei",
+        "kostenstellen": "Kostenstellen-Datei",
+    }
+    for key, label in labels.items():
+        uploaded = upload_map.get(key)
+        prefix = "✅" if uploaded else "⬜"
+        suffix = f" – {uploaded.name}" if uploaded else " – noch nicht hochgeladen"
+        status_lines.append(f"<li>{prefix} <strong>{label}</strong>{suffix}</li>")
+
+    st.markdown(
+        """
+        <div class="app-hero">
+            <h1>Sendeplan-Generator</h1>
+            <p>Links lädst du die Quelldateien hoch. Rechts erscheint danach sofort die Druckvorschau und der Download für die HTML-Datei.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    left_col, right_col = st.columns([3, 2], gap="large")
+    with left_col:
+        st.markdown(
+            f"""
+            <div class="empty-state">
+                <h3>So funktioniert die App</h3>
+                <ol>
+                    <li>Kundenliste, SAP-Datei, Transportgruppen, Kisoft-Datei und Kostenstellen-Datei links hochladen.</li>
+                    <li>Danach Kunde oder Kategorie auswählen.</li>
+                    <li>HTML-Datei herunterladen oder direkt drucken.</li>
+                </ol>
+                <p>Die große leere Fläche kam daher, dass die App vorher nach den Uploads sofort angehalten wurde. Dadurch wurde rechts fast nichts mehr gerendert.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with right_col:
+        st.markdown(
+            f"""
+            <div class="app-card">
+                <h3>Dateistatus</h3>
+                <ul class="status-list">
+                    {''.join(status_lines)}
+                </ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
 def main() -> None:
     init_session_state()
     st.markdown(app_css(), unsafe_allow_html=True)
-
-    st.title("📦 Sendeplan-Generator")
-    st.caption("Dateien hochladen, Sendeplan erzeugen und HTML zum Download bereitstellen.")
 
     with st.sidebar:
         st.header("Quelldateien")
@@ -913,7 +1062,10 @@ def main() -> None:
                 - Kostenstellen über **sap_von**, **sap_bis**, **tourengruppe**, **leiter**
                 """
             )
-            st.stop()
+
+    if not all_required_uploads_present(upload_map):
+        render_upload_waiting_screen(upload_map)
+        return
 
     try:
         customers_df, plan_rows_df, counts = prepare_dataframes(
@@ -932,6 +1084,16 @@ def main() -> None:
     except Exception as exc:
         st.error(f"Die hochgeladenen Dateien konnten nicht verarbeitet werden: {exc}")
         st.stop()
+
+    st.markdown(
+        """
+        <div class="app-hero">
+            <h1>Sendeplan-Generator</h1>
+            <p>Upload erfolgreich. Jetzt kannst du filtern, drucken und die komplette HTML-Datei herunterladen.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     with st.sidebar:
         st.divider()
