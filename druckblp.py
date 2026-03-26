@@ -922,12 +922,25 @@ def export_css() -> str:
         ══════════════════════════════════════ */
         .paper {
             width: 210mm;
+            height: 297mm;
             min-height: 297mm;
             margin: 0 auto 20px auto;
             background: #fff;
             box-shadow: 0 4px 24px rgba(0,0,0,0.18);
             padding: 12mm 13mm 14mm 13mm;
             position: relative;
+            overflow: hidden;
+        }
+        .paper-scale-frame {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            position: relative;
+        }
+        .paper-content {
+            transform-origin: top left;
+            transform: scale(var(--paper-scale, 1));
+            width: 100%;
         }
 
         /* ══════════════════════════════════════
@@ -1116,13 +1129,19 @@ def export_css() -> str:
 
             .paper {
                 width: 210mm !important;
-                min-height: 0 !important;
-                max-height: none !important;
+                height: 297mm !important;
+                min-height: 297mm !important;
+                max-height: 297mm !important;
                 margin: 0 !important;
                 padding: 10mm 12mm !important;
                 box-shadow: none !important;
                 border-radius: 0 !important;
                 page-break-inside: avoid;
+                overflow: hidden !important;
+            }
+            .paper-scale-frame {
+                height: 100% !important;
+                overflow: hidden !important;
             }
 
             .is-match, .is-current { outline: none !important; }
@@ -1314,40 +1333,44 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     kunden_nr = csb_nr if csb_nr else sap_nr
 
     return f"""
-    <div class="paper">
+    <div class="paper" data-autofit="a4">
+        <div class="paper-scale-frame">
+            <div class="paper-content">
 
-        <!-- ===== HEADER: Adresse | Titel | Logo ===== -->
-        <div class="doc-header">
-            <div class="doc-address">
-                <strong>{html.escape(name)}</strong><br>
-                {html.escape(strasse)}<br>
-                {html.escape(plz)} {html.escape(ort)}
-            </div>
+                <!-- ===== HEADER: Adresse | Titel | Logo ===== -->
+                <div class="doc-header">
+                    <div class="doc-address">
+                        <strong>{html.escape(name)}</strong><br>
+                        {html.escape(strasse)}<br>
+                        {html.escape(plz)} {html.escape(ort)}
+                    </div>
 
-            <div class="doc-title-block">
-                <div class="doc-title">Sende- &amp; Belieferungsplan</div>
-                <div class="doc-subtitle">{html.escape(subtitle)}</div>
-                <div class="doc-allsortiments">{allsortiments_line}</div>
-            </div>
+                    <div class="doc-title-block">
+                        <div class="doc-title">Sende- &amp; Belieferungsplan</div>
+                        <div class="doc-subtitle">{html.escape(subtitle)}</div>
+                        <div class="doc-allsortiments">{allsortiments_line}</div>
+                    </div>
 
-            <div class="doc-logo">
-                {logo_img_tag(logo_b64, logo_mime)}
+                    <div class="doc-logo">
+                        {logo_img_tag(logo_b64, logo_mime)}
+                    </div>
+                </div>
+
+                <!-- ===== INFOLEISTE ===== -->
+                <div class="doc-infobar">
+                    <strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}&nbsp;&nbsp;&nbsp;
+                    <strong>Fachberater:</strong> {html.escape(fachberater)}&nbsp;&nbsp;&nbsp;
+                    <strong>Stand:</strong> {html.escape(stand)}
+                </div>
+
+                <!-- ===== TOUR-ÜBERSICHT ===== -->
+                {tour_overview_html}
+
+                <!-- ===== PLANTABELLE ===== -->
+                {plan_table_html}
+
             </div>
         </div>
-
-        <!-- ===== INFOLEISTE ===== -->
-        <div class="doc-infobar">
-            <strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}&nbsp;&nbsp;&nbsp;
-            <strong>Fachberater:</strong> {html.escape(fachberater)}&nbsp;&nbsp;&nbsp;
-            <strong>Stand:</strong> {html.escape(stand)}
-        </div>
-
-        <!-- ===== TOUR-ÜBERSICHT ===== -->
-        {tour_overview_html}
-
-        <!-- ===== PLANTABELLE ===== -->
-        {plan_table_html}
-
     </div>
     """
 
@@ -1447,6 +1470,38 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         var matches    = [];
         var cursor     = -1;
 
+        function fitPaper(paper) {
+            if (!paper) return;
+            var frame = paper.querySelector(".paper-scale-frame");
+            var content = paper.querySelector(".paper-content");
+            if (!frame || !content) return;
+
+            paper.style.setProperty("--paper-scale", "1");
+            content.style.width = "100%";
+
+            var frameHeight = frame.clientHeight || (paper.clientHeight
+                - parseFloat(getComputedStyle(paper).paddingTop || 0)
+                - parseFloat(getComputedStyle(paper).paddingBottom || 0));
+            var frameWidth = frame.clientWidth || (paper.clientWidth
+                - parseFloat(getComputedStyle(paper).paddingLeft || 0)
+                - parseFloat(getComputedStyle(paper).paddingRight || 0));
+
+            var contentHeight = content.scrollHeight;
+            var contentWidth = content.scrollWidth;
+
+            if (!frameHeight || !frameWidth || !contentHeight || !contentWidth) return;
+
+            var scale = Math.min(1, frameHeight / contentHeight, frameWidth / contentWidth);
+            if (!isFinite(scale) || scale <= 0) scale = 1;
+
+            paper.style.setProperty("--paper-scale", String(scale));
+            content.style.width = scale < 1 ? (100 / scale).toFixed(4) + "%" : "100%";
+        }
+
+        function fitAllPapers() {
+            document.querySelectorAll('.paper[data-autofit="a4"]').forEach(fitPaper);
+        }
+
         function norm(s) {
             return (s || "").toLowerCase()
                 .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -1543,6 +1598,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         document.addEventListener("DOMContentLoaded", function () {
             allEntries = Array.from(document.querySelectorAll(".customer-entry"));
+            fitAllPapers();
 
             document.getElementById("search-input").addEventListener("input",   runSearch);
             document.getElementById("btn-next").addEventListener("click",  function () { step(1); });
@@ -1553,6 +1609,11 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (e.key === "Enter")  { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
                 if (e.key === "Escape") { resetSearch(); }
             });
+
+            window.addEventListener("resize", fitAllPapers);
+            window.addEventListener("beforeprint", fitAllPapers);
+            setTimeout(fitAllPapers, 50);
+            setTimeout(fitAllPapers, 250);
 
             updateCount();
         });
