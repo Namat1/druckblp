@@ -1024,39 +1024,48 @@ def export_css() -> str:
         /* ══════════════════════════════════════
            HAUPT-PLANTABELLE
         ══════════════════════════════════════ */
-        .plan-table {
+        .day-plan-wrap {
+            display: flex;
+            flex-direction: column;
+            gap: 3.5mm;
+        }
+        .day-section {
+            border: 1.5px solid #999;
+            background: #fff;
+        }
+        .day-section-header {
+            background: #f0f0f0;
+            border-bottom: 1.5px solid #999;
+            padding: 2.1mm 2.5mm;
+            font-size: 10pt;
+            font-weight: 700;
+        }
+        .day-section-table {
             width: 100%;
             border-collapse: collapse;
-            border: 1.5px solid #999;
             font-size: 9pt;
         }
-        .plan-table thead th {
-            border: 1px solid #999;
-            padding: 2mm 2.5mm;
+        .day-section-table th {
+            border-bottom: 1px solid #aaa;
+            padding: 1.8mm 2.5mm;
             text-align: left;
             font-weight: 700;
-            background: #fff;
-            font-size: 9.5pt;
+            background: #fafafa;
+            font-size: 9.25pt;
         }
-        .plan-table tbody td {
-            border: 1px solid #bbb;
-            padding: 1.5mm 2.5mm;
+        .day-section-table td {
+            border-top: 1px solid #c7c7c7;
+            padding: 1.8mm 2.5mm;
             vertical-align: top;
         }
-        .plan-table tr.day-start td {
-            border-top: 1.5px solid #888;
+        .day-section-table tbody tr:first-child td {
+            border-top: none;
         }
-        .plan-table td.liefertag-cell {
-            font-weight: 700;
-            width: 22mm;
-            white-space: nowrap;
-            vertical-align: top;
-        }
-        .plan-table td.bestelltag-cell {
+        .day-section-table td.bestelltag-cell {
             width: 24mm;
             white-space: nowrap;
         }
-        .plan-table td.zeit-cell {
+        .day-section-table td.zeit-cell {
             width: 26mm;
             white-space: nowrap;
         }
@@ -1187,14 +1196,12 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
 
 
 def render_plan_table(rows: pd.DataFrame) -> str:
-    """Haupttabelle: Liefertag (rowspan) | Sortiment | Bestelltag | Bestellzeitende.
-    Entspricht exakt dem PDF-Vorbild: Liefertag-Zelle nur einmal pro Tag, fett."""
+    """Rendert den Plan als klar getrennte Tagesblöcke für bessere Lesbarkeit."""
     if rows.empty:
         return "<p>Keine Planzeilen vorhanden.</p>"
 
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag", "Unbekannt"]
 
-    # Sortieren: erst nach Liefertag (Wochentag-Reihenfolge), dann Sortiment
     def day_sort_key(day: str) -> int:
         try:
             return day_order.index(day)
@@ -1202,7 +1209,6 @@ def render_plan_table(rows: pd.DataFrame) -> str:
             return 99
 
     def time_to_minutes(t: str) -> int:
-        """'20:00' -> 1200, '09:15' -> 555, '' -> 9999"""
         try:
             clean = t.replace(" Uhr", "").strip()
             h, m = clean.split(":")
@@ -1211,62 +1217,57 @@ def render_plan_table(rows: pd.DataFrame) -> str:
             return 9999
 
     ordered = rows.copy()
-    ordered["_day_order"]  = ordered["Liefertag"].map(day_sort_key)
+    ordered["_day_order"] = ordered["Liefertag"].map(day_sort_key)
     ordered["_time_order"] = ordered["Bestellzeitende"].map(normalize_text).map(time_to_minutes)
     ordered = ordered.sort_values(["_day_order", "SortKey_Sortiment", "_time_order"], ascending=[True, True, False])
 
-    # Rowspan pro Liefertag zählen
-    day_counts: dict = {}
-    for _, row in ordered.iterrows():
-        d = normalize_text(row.get("Liefertag", "Unbekannt"))
-        day_counts[d] = day_counts.get(d, 0) + 1
+    day_sections: list[str] = []
+    for day in day_order:
+        day_rows = ordered[ordered["Liefertag"].map(normalize_text) == day]
+        if day_rows.empty:
+            continue
 
-    body_rows: list = []
-    day_seen: set = set()
+        body_rows: list[str] = []
+        for _, row in day_rows.iterrows():
+            sortiment = normalize_text(row.get("Sortiment", ""))
+            bestelltag = normalize_text(row.get("Bestelltag_Name", ""))
+            zeitende = normalize_text(row.get("Bestellzeitende", ""))
 
-    for i, (_, row) in enumerate(ordered.iterrows()):
-        day        = normalize_text(row.get("Liefertag", "Unbekannt"))
-        sortiment  = normalize_text(row.get("Sortiment", ""))
-        bestelltag = normalize_text(row.get("Bestelltag_Name", ""))
-        zeitende   = normalize_text(row.get("Bestellzeitende", ""))
+            if zeitende and "uhr" not in zeitende.lower():
+                zeitende = zeitende + " Uhr"
 
-        # "Uhr" anhängen falls nicht schon vorhanden
-        if zeitende and "uhr" not in zeitende.lower():
-            zeitende = zeitende + " Uhr"
+            body_rows.append(
+                f"""<tr>
+                    <td class="sortiment-cell">{html.escape(sortiment)}</td>
+                    <td class="bestelltag-cell">{html.escape(bestelltag)}</td>
+                    <td class="zeit-cell">{html.escape(zeitende)}</td>
+                </tr>"""
+            )
 
-        is_day_start = day not in day_seen
-        day_seen.add(day)
-
-        day_cell = ""
-        if is_day_start:
-            rowspan = day_counts[day]
-            day_cell = f'<td class="liefertag-cell" rowspan="{rowspan}">{html.escape(day)}</td>'
-
-        tr_class = ' class="day-start"' if is_day_start else ""
-
-        body_rows.append(
-            f"""<tr{tr_class}>
-                {day_cell}
-                <td class="sortiment-cell">{html.escape(sortiment)}</td>
-                <td class="bestelltag-cell">{html.escape(bestelltag)}</td>
-                <td class="zeit-cell">{html.escape(zeitende)}</td>
-            </tr>"""
+        day_sections.append(
+            f"""
+            <section class="day-section">
+                <div class="day-section-header">{html.escape(day)}</div>
+                <table class="day-section-table">
+                    <thead>
+                        <tr>
+                            <th>Sortiment</th>
+                            <th style="width:22mm;">Bestelltag</th>
+                            <th style="width:24mm;">Bestellzeitende</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {''.join(body_rows)}
+                    </tbody>
+                </table>
+            </section>
+            """
         )
 
     return f"""
-    <table class="plan-table">
-        <thead>
-            <tr>
-                <th style="width:20mm;">Liefertag</th>
-                <th>Sortiment</th>
-                <th style="width:22mm;">Bestelltag</th>
-                <th style="width:24mm;">Bestellzeitende</th>
-            </tr>
-        </thead>
-        <tbody>
-            {"".join(body_rows)}
-        </tbody>
-    </table>
+    <div class="day-plan-wrap">
+        {''.join(day_sections)}
+    </div>
     """
 
 
