@@ -1,3 +1,4 @@
+import base64
 import html
 import io
 import re
@@ -814,121 +815,160 @@ def render_panel(title: str, body: str) -> None:
 def export_css() -> str:
     return """
     <style>
-        :root {
-            --paper-width: 210mm;
-            --paper-min-height: 297mm;
-            --border-color: #aaaaaa;
-            --muted: #5f6b76;
-            --accent: #1a1a1a;
-            --header-blue: #003366;
-        }
-
-        * { box-sizing: border-box; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            margin: 0;
-            background: #e8ecf0;
-            color: #1a1a1a;
+            background: #d8dfe8;
             font-family: Arial, Helvetica, sans-serif;
             font-size: 10pt;
+            color: #111;
         }
 
-        /* ── Papier-Seite ── */
-        .paper {
+        /* ══════════════════════════════════════
+           SUCHE (on-screen only)
+        ══════════════════════════════════════ */
+        .search-bar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: #1a3a5c;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+        }
+        .search-bar-logo {
+            font-size: 14px;
+            font-weight: 800;
+            color: #f5a623;
+            letter-spacing: 0.04em;
+            white-space: nowrap;
+        }
+        .search-bar input {
+            flex: 1;
+            min-width: 200px;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 13px;
+            outline: none;
+            background: #fff;
+            color: #111;
+        }
+        .search-bar input:focus { box-shadow: 0 0 0 2px #f5a623; }
+        .search-btn {
+            border: none;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #2a5298;
+            color: #fff;
+            transition: background 0.15s;
+        }
+        .search-btn:hover { background: #3a6bc4; }
+        .search-btn.reset { background: #c0392b; }
+        .search-btn.reset:hover { background: #e74c3c; }
+        .search-count {
+            font-size: 12px;
+            color: #bcd0ec;
+            white-space: nowrap;
+            min-width: 90px;
+        }
+        .search-empty {
+            display: none;
+            background: #fff3cd;
+            color: #856404;
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 600;
             width: 100%;
-            max-width: var(--paper-width);
-            min-height: var(--paper-min-height);
-            margin: 0 auto 1.5rem auto;
-            background: white;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.14);
-            border-radius: 4px;
-            padding: 10mm 12mm 12mm 12mm;
-            color: #1a1a1a;
         }
 
-        /* ── Seitenheader: 3 Spalten ── */
+        /* ══════════════════════════════════════
+           SEITEN-WRAPPER
+        ══════════════════════════════════════ */
+        .page-stack {
+            padding: 20px 0;
+        }
+
+        /* ══════════════════════════════════════
+           A4-PAPIER
+        ══════════════════════════════════════ */
+        .paper {
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto 20px auto;
+            background: #fff;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+            padding: 12mm 13mm 14mm 13mm;
+            position: relative;
+        }
+
+        /* ══════════════════════════════════════
+           SEITENHEADER
+        ══════════════════════════════════════ */
         .doc-header {
             display: grid;
-            grid-template-columns: auto 1fr auto;
-            gap: 4mm;
+            grid-template-columns: 52mm 1fr 44mm;
+            gap: 3mm;
             align-items: flex-start;
-            margin-bottom: 5mm;
+            margin-bottom: 4mm;
+            padding-bottom: 3mm;
         }
         .doc-address {
             font-size: 9pt;
-            line-height: 1.45;
-            min-width: 52mm;
+            line-height: 1.5;
+        }
+        .doc-address strong {
+            font-size: 9.5pt;
+            font-weight: 700;
+            display: block;
+            margin-bottom: 0.5mm;
         }
         .doc-title-block {
             text-align: center;
+            padding: 0 4mm;
         }
         .doc-title {
-            font-size: 18pt;
+            font-size: 20pt;
             font-weight: 700;
-            color: #1a1a1a;
-            margin: 0 0 1mm 0;
             letter-spacing: -0.01em;
+            line-height: 1.1;
+            margin-bottom: 1mm;
         }
         .doc-subtitle {
-            font-size: 13pt;
+            font-size: 14pt;
             font-weight: 700;
             color: #cc0000;
-            margin: 0 0 1mm 0;
+            margin-bottom: 1.5mm;
         }
         .doc-allsortiments {
-            font-size: 9pt;
+            font-size: 8.5pt;
             color: #444;
-            margin: 0;
         }
-        /* NORDfrische Center Logo (CSS-only) */
         .doc-logo {
             text-align: right;
-            min-width: 42mm;
-        }
-        .logo-nfc {
-            display: inline-block;
-            border: 2px solid #003366;
-            padding: 2mm 3mm 2mm 3mm;
-            line-height: 1.2;
-        }
-        .logo-nfc-top {
-            font-size: 7pt;
-            font-weight: 700;
-            color: #003366;
-            letter-spacing: 0.04em;
-            display: block;
-        }
-        .logo-nfc-main {
-            font-size: 11pt;
-            font-weight: 900;
-            color: #003366;
-            display: block;
-        }
-        .logo-nfc-sub {
-            font-size: 6.5pt;
-            color: #555;
-            display: block;
-        }
-        .logo-edeka {
-            display: inline-block;
-            border: 2px solid #f5a623;
-            background: #f5a623;
-            color: #003366;
-            font-size: 11pt;
-            font-weight: 900;
-            padding: 1.5mm 2.5mm;
-            margin-left: 1.5mm;
-            vertical-align: top;
         }
 
-        /* ── Infoleiste: Kunden-Nr / Fachberater / Stand ── */
+        /* ══════════════════════════════════════
+           INFOLEISTE
+        ══════════════════════════════════════ */
         .doc-infobar {
             font-size: 9.5pt;
-            margin: 3mm 0 4mm 0;
+            margin: 3.5mm 0 4mm 0;
+            padding-top: 2.5mm;
+            border-top: 1px solid #ccc;
         }
         .doc-infobar strong { font-weight: 700; }
 
-        /* ── Tour-Übersichtstabelle ── */
+        /* ══════════════════════════════════════
+           TOUR-ÜBERSICHT
+        ══════════════════════════════════════ */
         .tour-overview {
             width: 100%;
             border-collapse: collapse;
@@ -937,179 +977,121 @@ def export_css() -> str:
         }
         .tour-overview td {
             border: 1px solid #aaa;
-            padding: 1.5mm 2.5mm;
+            padding: 1.2mm 2.5mm;
             white-space: nowrap;
         }
+        .tour-overview tr:first-child td { font-weight: 700; }
         .tour-overview td:first-child {
             font-weight: 700;
-            background: #f5f5f5;
-            width: 14mm;
+            background: #f0f0f0;
+            width: 20mm;
         }
 
-        /* ── Haupttabelle ── */
+        /* ══════════════════════════════════════
+           HAUPT-PLANTABELLE
+        ══════════════════════════════════════ */
         .plan-table {
             width: 100%;
             border-collapse: collapse;
-            border: 1.5px solid #aaa;
+            border: 1.5px solid #999;
             font-size: 9pt;
         }
-        .plan-table th {
-            border: 1px solid #aaa;
+        .plan-table thead th {
+            border: 1px solid #999;
             padding: 2mm 2.5mm;
             text-align: left;
             font-weight: 700;
-            background: white;
+            background: #fff;
+            font-size: 9.5pt;
         }
-        .plan-table td {
-            border: 1px solid #aaa;
+        .plan-table tbody td {
+            border: 1px solid #bbb;
             padding: 1.5mm 2.5mm;
-            text-align: left;
             vertical-align: top;
         }
-        /* Liefertag-Zelle: fett, breite 20mm, rowspan */
-        .plan-table td.liefertag-cell {
-            font-weight: 700;
-            width: 20mm;
-            vertical-align: top;
-        }
-        /* Sortiment-Zelle */
-        .plan-table td.sortiment-cell {
-            width: auto;
-        }
-        /* Bestelltag / Bestellzeitende */
-        .plan-table td.bestelltag-cell {
-            width: 22mm;
-            white-space: nowrap;
-        }
-        .plan-table td.zeit-cell {
-            width: 22mm;
-            white-space: nowrap;
-        }
-        /* Trennzeile zwischen Liefertagen (dicker oberer Rand) */
         .plan-table tr.day-start td {
             border-top: 1.5px solid #888;
         }
+        .plan-table td.liefertag-cell {
+            font-weight: 700;
+            width: 22mm;
+            white-space: nowrap;
+            vertical-align: top;
+        }
+        .plan-table td.bestelltag-cell {
+            width: 24mm;
+            white-space: nowrap;
+        }
+        .plan-table td.zeit-cell {
+            width: 26mm;
+            white-space: nowrap;
+        }
 
-        /* ── Cover / Separator ── */
+        /* ══════════════════════════════════════
+           COVER / SEPARATOR
+        ══════════════════════════════════════ */
         .cover-page, .separator-page {
-            width: 100%;
-            max-width: var(--paper-width);
-            min-height: var(--paper-min-height);
-            margin: 0 auto 1.5rem auto;
-            background: white;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.12);
-            border-radius: 4px;
-            padding: 18mm 14mm;
+            width: 210mm;
+            min-height: 297mm;
+            margin: 0 auto 20px auto;
+            background: #fff;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+            padding: 20mm 16mm;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
-            page-break-after: always;
         }
         .cover-page h1, .separator-page h1 {
-            margin: 0 0 8mm 0;
-            font-size: 26pt;
-            color: #003366;
+            font-size: 26pt; color: #003366; margin-bottom: 8mm;
         }
         .cover-page h2, .separator-page h2 {
-            margin: 0 0 4mm 0;
-            font-size: 16pt;
-            color: #2d3741;
+            font-size: 15pt; color: #333; margin-bottom: 4mm;
         }
         .cover-page p, .separator-page p {
-            font-size: 11pt;
-            color: #5f6b76;
-            margin: 1.5mm 0;
+            font-size: 10pt; color: #666; margin: 1mm 0;
         }
 
-        /* ── Export-Suche ── */
-        .export-search-toolbar {
-            width: 100%;
-            max-width: var(--paper-width);
-            margin: 1rem auto;
-            background: white;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.12);
-            border-radius: 8px;
-            padding: 14px 16px;
-            color: #1f2933;
-        }
-        .export-search-title {
-            margin: 0 0 10px 0;
-            font-size: 16px;
-            font-weight: 700;
-            color: #003366;
-        }
-        .export-search-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 12px;
-        }
-        .export-search-field label {
-            display: block;
-            font-size: 12px;
-            font-weight: 700;
-            color: #44515d;
-            margin-bottom: 6px;
-        }
-        .export-search-field input {
-            width: 100%;
-            border: 1px solid #cbd5e1;
-            border-radius: 8px;
-            padding: 10px 12px;
-            font-size: 14px;
-            color: #111827;
-            background: #fff;
-        }
-        .export-search-actions {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 12px;
-            margin-top: 12px;
-        }
-        .export-search-actions button {
-            border: 1px solid #9fb4c8;
-            border-radius: 8px;
-            padding: 9px 14px;
-            background: #f8fbff;
-            color: #184b6b;
-            font-weight: 700;
-            cursor: pointer;
-        }
-        .export-search-results { font-size: 13px; color: #526173; }
-        .export-empty-results {
-            display: none;
-            margin-top: 12px;
-            border: 1px solid #d7dde5;
-            border-radius: 8px;
-            padding: 12px;
-            background: #fafcfe;
-            color: #526173;
-        }
+        /* ══════════════════════════════════════
+           HIGHLIGHT BEIM SUCHEN
+        ══════════════════════════════════════ */
         .customer-entry { display: block; }
+        .paper.is-match {
+            outline: 3px solid #f5a623;
+            outline-offset: -2px;
+        }
+        .paper.is-current {
+            outline: 4px solid #e74c3c;
+            outline-offset: -2px;
+        }
 
-        @page { size: A4 portrait; margin: 10mm; }
+        /* ══════════════════════════════════════
+           DRUCK
+        ══════════════════════════════════════ */
+        @page { size: A4 portrait; margin: 8mm; }
 
         @media print {
             body { background: white; }
-            .export-search-toolbar, .export-empty-results {
-                display: none !important;
-                visibility: hidden !important;
-            }
+            .search-bar { display: none !important; }
+            .page-stack { padding: 0; }
             .paper, .cover-page, .separator-page {
-                width: auto !important;
+                width: 100% !important;
                 min-height: auto !important;
                 box-shadow: none !important;
-                border-radius: 0 !important;
                 margin: 0 !important;
-                padding: 8mm 10mm !important;
+                padding: 6mm 8mm !important;
                 page-break-after: always;
                 break-after: page;
             }
-            .paper:last-child, .separator-page:last-child, .cover-page:last-child {
+            .paper:last-child,
+            .separator-page:last-child,
+            .cover-page:last-child {
                 page-break-after: auto;
                 break-after: auto;
+            }
+            .is-match, .is-current {
+                outline: none !important;
             }
         }
     </style>
@@ -1236,7 +1218,29 @@ def render_plan_table(rows: pd.DataFrame) -> str:
     """
 
 
-def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> str:
+def logo_img_tag(logo_b64: str, logo_mime: str = "image/png") -> str:
+    """Gibt ein <img>-Tag mit Base64-Logo zurueck, oder das CSS-Fallback-Logo."""
+    if logo_b64:
+        return (
+            f'<img src="data:{logo_mime};base64,{logo_b64}" ' 
+            f'alt="NORDfrische Center" style="height:28mm; width:auto; display:block;">' 
+        )
+    # CSS-Fallback
+    return """
+        <div style="display:inline-flex; align-items:flex-start; gap:3px;">
+            <div style="border:1.5px solid #003366; padding:2mm 3mm; line-height:1.25; display:inline-block;">
+                <span style="display:block; font-size:6.5pt; font-weight:800; color:#003366;
+                             letter-spacing:0.06em; text-transform:uppercase;">NORDfrische</span>
+                <span style="display:block; font-size:9.5pt; font-weight:900; color:#003366;">Center</span>
+                <span style="display:block; font-size:5.5pt; color:#555;">Das Fleischwerk von EDEKA Nord</span>
+            </div>
+            <div style="border:1.5px solid #f5a623; background:#f5a623; color:#003366;
+                        font-size:12pt; font-weight:900; padding:1.5mm 2.5mm; line-height:1.15;">NORD</div>
+        </div>"""
+
+
+
+def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_b64: str = "", logo_mime: str = "image/png") -> str:
     """Rendert eine einzelne Kundenseite exakt nach dem PDF-Vorbild."""
     sap_nr      = normalize_text(customer.get("SAP_Nr", ""))
     csb_nr      = normalize_text(customer.get("CSB_Nr", ""))
@@ -1294,12 +1298,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> st
             </div>
 
             <div class="doc-logo">
-                <span class="logo-nfc">
-                    <span class="logo-nfc-top">NORD</span>
-                    <span class="logo-nfc-main">frische Center</span>
-                    <span class="logo-nfc-sub">Das Fleischwerk von EDEKA Nord</span>
-                </span>
-                <span class="logo-edeka">E</span>
+                {logo_img_tag(logo_b64, logo_mime)}
             </div>
         </div>
 
@@ -1345,40 +1344,21 @@ def render_separator_page(customer: pd.Series) -> str:
 
 def render_export_search_toolbar() -> str:
     return """
-    <div class="export-search-toolbar" id="search-bar">
-        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-            <div class="export-search-title" style="margin:0; flex-shrink:0;">Suche</div>
-            <div style="flex:1; min-width:220px;">
-                <input id="search-input" type="text"
-                    placeholder="Name, SAP, CSB, Ort, Fachberater, Sortiment …"
-                    autocomplete="off"
-                    style="width:100%; border:1px solid #cbd5e1; border-radius:8px;
-                           padding:9px 12px; font-size:14px; color:#111827; background:#fff;" />
-            </div>
-            <div style="display:flex; gap:8px; flex-shrink:0;">
-                <button type="button" id="btn-prev" title="Vorheriger Treffer"
-                    style="border:1px solid #9fb4c8; border-radius:8px; padding:8px 13px;
-                           background:#f8fbff; color:#184b6b; font-weight:700; cursor:pointer;">&#8593;</button>
-                <button type="button" id="btn-next" title="Nächster Treffer"
-                    style="border:1px solid #9fb4c8; border-radius:8px; padding:8px 13px;
-                           background:#f8fbff; color:#184b6b; font-weight:700; cursor:pointer;">&#8595;</button>
-                <button type="button" id="btn-reset"
-                    style="border:1px solid #9fb4c8; border-radius:8px; padding:8px 13px;
-                           background:#f8fbff; color:#184b6b; font-weight:700; cursor:pointer;">&#10005; Alle</button>
-            </div>
-            <div id="search-result-label"
-                style="font-size:13px; color:#526173; white-space:nowrap; flex-shrink:0;"></div>
-        </div>
-        <div id="search-empty"
-            style="display:none; margin-top:10px; border:1px solid #d7dde5; border-radius:8px;
-                   padding:10px 14px; background:#fafcfe; color:#526173; font-size:13px;">
-            Keine Treffer.
-        </div>
-    </div>
+    <nav class="search-bar" id="search-bar" role="search">
+        <span class="search-bar-logo">&#128230; Sendeplan</span>
+        <input id="search-input" type="text"
+            placeholder="Name, SAP, CSB, Ort, Fachberater, Sortiment …"
+            autocomplete="off" spellcheck="false" />
+        <button type="button" class="search-btn" id="btn-prev" title="Vorheriger (Shift+Enter)">&#8679;</button>
+        <button type="button" class="search-btn" id="btn-next" title="Nächster (Enter)">&#8681;</button>
+        <button type="button" class="search-btn reset" id="btn-reset" title="Zurücksetzen (Esc)">&#10005;</button>
+        <span class="search-count" id="search-count"></span>
+        <span class="search-empty" id="search-empty">Keine Treffer.</span>
+    </nav>
     """
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True) -> str:
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png") -> str:
     docs: List[str] = [
         render_cover_page(
             title="Sendeplan-Generator",
@@ -1423,7 +1403,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         entry_parts: List[str] = []
         if include_separators:
             entry_parts.append(render_separator_page(customer))
-        entry_parts.append(render_customer_plan(customer, rows))
+        entry_parts.append(render_customer_plan(customer, rows, logo_b64=logo_b64, logo_mime=logo_mime))
 
         csb_search = " ".join([part for part in [csb_nr, *csb_touren] if part]).lower()
         docs.append(
@@ -1440,90 +1420,120 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
     search_script = """
     <script>
-    (function() {
-        var entries   = [];
-        var matches   = [];
-        var matchIdx  = -1;
+    (function () {
+        "use strict";
+        var allEntries = [];
+        var matches    = [];
+        var cursor     = -1;
 
-        function norm(s) { return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
-
-        function buildIndex() {
-            entries = Array.from(document.querySelectorAll('.customer-entry'));
+        function norm(s) {
+            return (s || "").toLowerCase()
+                .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z0-9 ]/g, " ")
+                .replace(/ +/g, " ").trim();
         }
 
-        function highlight(entry, on) {
-            entry.querySelectorAll('.paper').forEach(function(p) {
-                p.style.outline = on ? '3px solid #f5a623' : '';
-                p.style.outlineOffset = on ? '2px' : '';
+        function papers(entry) {
+            return entry.querySelectorAll(".paper");
+        }
+
+        function setClass(entry, cls, on) {
+            papers(entry).forEach(function (p) {
+                p.classList.toggle(cls, on);
             });
         }
 
-        function scrollTo(entry) {
-            entry.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        function clearHighlights() {
+            matches.forEach(function (e) {
+                setClass(e, "is-match",   false);
+                setClass(e, "is-current", false);
+            });
         }
 
-        function applySearch() {
-            var q = norm(document.getElementById('search-input').value.trim());
-            matches = [];
-            matchIdx = -1;
+        function scrollToCurrent() {
+            if (cursor < 0 || cursor >= matches.length) return;
+            var entry = matches[cursor];
+            setClass(entry, "is-current", true);
+            entry.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
 
-            entries.forEach(function(entry) {
-                var blob = norm(entry.getAttribute('data-search') || '');
-                var show = !q || blob.includes(q);
-                entry.style.display = show ? '' : 'none';
-                highlight(entry, false);
-                if (show && q) matches.push(entry);
-            });
-
-            var lbl = document.getElementById('search-result-label');
-            var emp = document.getElementById('search-empty');
-            var total = entries.filter(function(e){ return e.style.display !== 'none'; }).length;
-
-            if (q) {
-                lbl.textContent = matches.length + ' Treffer';
-                emp.style.display = matches.length === 0 ? 'block' : 'none';
-                if (matches.length > 0) {
-                    matchIdx = 0;
-                    highlight(matches[0], true);
-                    scrollTo(matches[0]);
-                }
+        function updateCount() {
+            var lbl = document.getElementById("search-count");
+            var emp = document.getElementById("search-empty");
+            var q   = document.getElementById("search-input").value.trim();
+            if (!q) {
+                var vis = allEntries.filter(function (e) {
+                    return e.style.display !== "none";
+                }).length;
+                lbl.textContent = vis + " Kunden";
+                emp.style.display = "none";
             } else {
-                lbl.textContent = total + ' Kunden';
-                emp.style.display = 'none';
+                if (matches.length === 0) {
+                    lbl.textContent = "0 Treffer";
+                    emp.style.display = "inline-block";
+                } else {
+                    lbl.textContent = (cursor + 1) + " / " + matches.length;
+                    emp.style.display = "none";
+                }
             }
         }
 
-        function stepMatch(dir) {
+        function runSearch() {
+            var q = norm(document.getElementById("search-input").value);
+            clearHighlights();
+            matches = [];
+            cursor  = -1;
+
+            allEntries.forEach(function (entry) {
+                var blob = norm(entry.getAttribute("data-search") || "");
+                var show = !q || blob.indexOf(q) !== -1;
+                entry.style.display = show ? "" : "none";
+                if (show && q) {
+                    setClass(entry, "is-match", true);
+                    matches.push(entry);
+                }
+            });
+
+            if (matches.length > 0) {
+                cursor = 0;
+                setClass(matches[0], "is-current", true);
+                scrollToCurrent();
+            }
+            updateCount();
+        }
+
+        function step(dir) {
             if (matches.length === 0) return;
-            highlight(matches[matchIdx], false);
-            matchIdx = (matchIdx + dir + matches.length) % matches.length;
-            highlight(matches[matchIdx], true);
-            scrollTo(matches[matchIdx]);
-            document.getElementById('search-result-label').textContent =
-                (matchIdx + 1) + ' / ' + matches.length + ' Treffer';
+            setClass(matches[cursor], "is-current", false);
+            cursor = (cursor + dir + matches.length) % matches.length;
+            setClass(matches[cursor], "is-current", true);
+            scrollToCurrent();
+            updateCount();
         }
 
         function resetSearch() {
-            document.getElementById('search-input').value = '';
-            applySearch();
+            clearHighlights();
+            document.getElementById("search-input").value = "";
+            allEntries.forEach(function (e) { e.style.display = ""; });
+            matches = [];
+            cursor  = -1;
+            updateCount();
         }
 
-        document.addEventListener('DOMContentLoaded', function() {
-            buildIndex();
-            document.getElementById('search-input').addEventListener('input', applySearch);
-            document.getElementById('btn-prev').addEventListener('click', function(){ stepMatch(-1); });
-            document.getElementById('btn-next').addEventListener('click', function(){ stepMatch(1); });
-            document.getElementById('btn-reset').addEventListener('click', resetSearch);
+        document.addEventListener("DOMContentLoaded", function () {
+            allEntries = Array.from(document.querySelectorAll(".customer-entry"));
 
-            // Keyboard: Enter = next, Shift+Enter = prev, Escape = reset
-            document.getElementById('search-input').addEventListener('keydown', function(e) {
-                if (e.key === 'Enter') { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); }
-                if (e.key === 'Escape') { resetSearch(); }
+            document.getElementById("search-input").addEventListener("input",   runSearch);
+            document.getElementById("btn-next").addEventListener("click",  function () { step(1); });
+            document.getElementById("btn-prev").addEventListener("click",  function () { step(-1); });
+            document.getElementById("btn-reset").addEventListener("click", resetSearch);
+
+            document.getElementById("search-input").addEventListener("keydown", function (e) {
+                if (e.key === "Enter")  { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
+                if (e.key === "Escape") { resetSearch(); }
             });
 
-            // Initial count
-            var lbl = document.getElementById('search-result-label');
-            lbl.textContent = entries.length + ' Kunden';
+            updateCount();
         });
     })();
     </script>
@@ -1540,14 +1550,16 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     </head>
     <body>
         {render_export_search_toolbar()}
+        <div class="page-stack">
         {''.join(docs)}
+        </div>
         {search_script}
     </body>
     </html>
     """
 
 
-def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame) -> str:
+def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame, logo_b64: str = "", logo_mime: str = "image/png") -> str:
     return f"""
     <!DOCTYPE html>
     <html lang="de">
@@ -1558,7 +1570,7 @@ def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame)
         {export_css()}
     </head>
     <body>
-        {render_customer_plan(customer, customer_rows)}
+        {render_customer_plan(customer, customer_rows, logo_b64=logo_b64, logo_mime=logo_mime)}
     </body>
     </html>
     """
@@ -1729,6 +1741,13 @@ def main() -> None:
             help="Benötigte Felder: sap_von, sap_bis, tourengruppe, leiter",
         )
 
+        st.divider()
+        logo_file = st.file_uploader(
+            "Logo (optional)",
+            type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
+            help="Wird oben rechts auf jedem Sendeplan angezeigt (PNG/JPG empfohlen)",
+        )
+
         upload_map = {
             "kunden": kunden_file,
             "sap": sap_file,
@@ -1862,7 +1881,17 @@ def main() -> None:
         if filtered_customers.empty:
             st.warning("Es gibt im aktuellen Filter keine Daten für einen HTML-Export.")
         else:
-            bulk_html = build_full_document_html(filtered_customers, plan_rows_df, include_separators=True)
+            logo_b64 = ""
+            logo_mime = "image/png"
+            if logo_file is not None:
+                raw = logo_file.getvalue()
+                logo_b64 = base64.b64encode(raw).decode("utf-8")
+                ext = logo_file.name.rsplit(".", 1)[-1].lower()
+                logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
+                             "png": "image/png", "svg": "image/svg+xml",
+                             "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
+            bulk_html = build_full_document_html(filtered_customers, plan_rows_df,
+                            include_separators=True, logo_b64=logo_b64, logo_mime=logo_mime)
             filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
 
             col1, col2 = st.columns(2)
@@ -1878,7 +1907,7 @@ def main() -> None:
                 if st.session_state.selected_sap:
                     selected_customer = filtered_customers[filtered_customers["SAP_Nr"] == st.session_state.selected_sap].iloc[0]
                     customer_rows = plan_rows_df[plan_rows_df["SAP_Nr"] == st.session_state.selected_sap].copy()
-                    single_html = build_single_document_html(selected_customer, customer_rows)
+                    single_html = build_single_document_html(selected_customer, customer_rows, logo_b64=logo_b64, logo_mime=logo_mime)
                     st.download_button(
                         label="Aktuellen Kunden als HTML herunterladen",
                         data=single_html,
