@@ -1167,9 +1167,19 @@ def render_plan_table(rows: pd.DataFrame) -> str:
         except ValueError:
             return 99
 
+    def time_to_minutes(t: str) -> int:
+        """'20:00' -> 1200, '09:15' -> 555, '' -> 9999"""
+        try:
+            clean = t.replace(" Uhr", "").strip()
+            h, m = clean.split(":")
+            return int(h) * 60 + int(m)
+        except Exception:
+            return 9999
+
     ordered = rows.copy()
-    ordered["_day_order"] = ordered["Liefertag"].map(day_sort_key)
-    ordered = ordered.sort_values(["_day_order", "SortKey_Sortiment", "Bestellzeitende"])
+    ordered["_day_order"]  = ordered["Liefertag"].map(day_sort_key)
+    ordered["_time_order"] = ordered["Bestellzeitende"].map(normalize_text).map(time_to_minutes)
+    ordered = ordered.sort_values(["_day_order", "_time_order", "SortKey_Sortiment"])
 
     # Rowspan pro Liefertag zählen
     day_counts: dict = {}
@@ -1335,24 +1345,34 @@ def render_separator_page(customer: pd.Series) -> str:
 
 def render_export_search_toolbar() -> str:
     return """
-    <div class="export-search-toolbar">
-        <div class="export-search-title">Suche im exportierten Sendeplan</div>
-        <div class="export-search-grid">
-            <div class="export-search-field">
-                <label for="search-sap">SAP-Nummer</label>
-                <input id="search-sap" type="text" placeholder="zum Beispiel 211393" />
+    <div class="export-search-toolbar" id="search-bar">
+        <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div class="export-search-title" style="margin:0; flex-shrink:0;">Suche</div>
+            <div style="flex:1; min-width:220px;">
+                <input id="search-input" type="text"
+                    placeholder="Name, SAP, CSB, Ort, Fachberater, Sortiment …"
+                    autocomplete="off"
+                    style="width:100%; border:1px solid #cbd5e1; border-radius:8px;
+                           padding:9px 12px; font-size:14px; color:#111827; background:#fff;" />
             </div>
-            <div class="export-search-field">
-                <label for="search-csb">CSB-Nummer oder CSB-Tour</label>
-                <input id="search-csb" type="text" placeholder="zum Beispiel 2881 oder 22221" />
+            <div style="display:flex; gap:8px; flex-shrink:0;">
+                <button type="button" id="btn-prev" title="Vorheriger Treffer"
+                    style="border:1px solid #9fb4c8; border-radius:8px; padding:8px 13px;
+                           background:#f8fbff; color:#184b6b; font-weight:700; cursor:pointer;">&#8593;</button>
+                <button type="button" id="btn-next" title="Nächster Treffer"
+                    style="border:1px solid #9fb4c8; border-radius:8px; padding:8px 13px;
+                           background:#f8fbff; color:#184b6b; font-weight:700; cursor:pointer;">&#8595;</button>
+                <button type="button" id="btn-reset"
+                    style="border:1px solid #9fb4c8; border-radius:8px; padding:8px 13px;
+                           background:#f8fbff; color:#184b6b; font-weight:700; cursor:pointer;">&#10005; Alle</button>
             </div>
+            <div id="search-result-label"
+                style="font-size:13px; color:#526173; white-space:nowrap; flex-shrink:0;"></div>
         </div>
-        <div class="export-search-actions">
-            <button type="button" onclick="resetExportSearch()">Suche zurücksetzen</button>
-            <div id="export-search-results" class="export-search-results"></div>
-        </div>
-        <div id="export-empty-results" class="export-empty-results">
-            Keine Treffer für die aktuelle SAP- oder CSB-Suche.
+        <div id="search-empty"
+            style="display:none; margin-top:10px; border:1px solid #d7dde5; border-radius:8px;
+                   padding:10px 14px; background:#fafcfe; color:#526173; font-size:13px;">
+            Keine Treffer.
         </div>
     </div>
     """
@@ -1381,8 +1401,22 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             for value in rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist()
             if normalize_text(value)
         })
+        # Volltext-Blob: alle durchsuchbaren Felder zusammenfassen
+        sortimente_text = " ".join(sorted({
+            normalize_text(v) for v in rows.get("Sortiment", pd.Series(dtype=str)).tolist() if normalize_text(v)
+        }))
         search_blob = " ".join(
-            part for part in [sap, csb_nr, " ".join(csb_touren), normalize_text(customer.get("Name", ""))]
+            part for part in [
+                sap, csb_nr, " ".join(csb_touren),
+                normalize_text(customer.get("Name", "")),
+                normalize_text(customer.get("Ort", "")),
+                normalize_text(customer.get("PLZ", "")),
+                normalize_text(customer.get("Strasse", "")),
+                normalize_text(customer.get("Fachberater", "")),
+                normalize_text(customer.get("Tourengruppe", "")),
+                normalize_text(customer.get("Kategorie", "")),
+                sortimente_text,
+            ]
             if part
         ).lower()
 
@@ -1404,47 +1438,94 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         )
         entry_count += 1
 
-    search_script = f"""
+    search_script = """
     <script>
-        function normalizeSearchValue(value) {{
-            return (value || '').toLowerCase().trim();
-        }}
+    (function() {
+        var entries   = [];
+        var matches   = [];
+        var matchIdx  = -1;
 
-        function applyExportSearch() {{
-            const sapValue = normalizeSearchValue(document.getElementById('search-sap').value);
-            const csbValue = normalizeSearchValue(document.getElementById('search-csb').value);
-            const entries = Array.from(document.querySelectorAll('.customer-entry'));
-            let visibleCount = 0;
+        function norm(s) { return (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,''); }
 
-            entries.forEach((entry) => {{
-                const sap = normalizeSearchValue(entry.getAttribute('data-sap'));
-                const csb = normalizeSearchValue(entry.getAttribute('data-csb'));
-                const sapOk = !sapValue || sap.includes(sapValue);
-                const csbOk = !csbValue || csb.includes(csbValue);
-                const show = sapOk && csbOk;
+        function buildIndex() {
+            entries = Array.from(document.querySelectorAll('.customer-entry'));
+        }
+
+        function highlight(entry, on) {
+            entry.querySelectorAll('.paper').forEach(function(p) {
+                p.style.outline = on ? '3px solid #f5a623' : '';
+                p.style.outlineOffset = on ? '2px' : '';
+            });
+        }
+
+        function scrollTo(entry) {
+            entry.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        function applySearch() {
+            var q = norm(document.getElementById('search-input').value.trim());
+            matches = [];
+            matchIdx = -1;
+
+            entries.forEach(function(entry) {
+                var blob = norm(entry.getAttribute('data-search') || '');
+                var show = !q || blob.includes(q);
                 entry.style.display = show ? '' : 'none';
-                if (show) {{
-                    visibleCount += 1;
-                }}
-            }});
+                highlight(entry, false);
+                if (show && q) matches.push(entry);
+            });
 
-            const resultLabel = document.getElementById('export-search-results');
-            const emptyState = document.getElementById('export-empty-results');
-            resultLabel.textContent = `Treffer: ${{visibleCount}} / {entry_count}`;
-            emptyState.style.display = visibleCount === 0 ? 'block' : 'none';
-        }}
+            var lbl = document.getElementById('search-result-label');
+            var emp = document.getElementById('search-empty');
+            var total = entries.filter(function(e){ return e.style.display !== 'none'; }).length;
 
-        function resetExportSearch() {{
-            document.getElementById('search-sap').value = '';
-            document.getElementById('search-csb').value = '';
-            applyExportSearch();
-        }}
+            if (q) {
+                lbl.textContent = matches.length + ' Treffer';
+                emp.style.display = matches.length === 0 ? 'block' : 'none';
+                if (matches.length > 0) {
+                    matchIdx = 0;
+                    highlight(matches[0], true);
+                    scrollTo(matches[0]);
+                }
+            } else {
+                lbl.textContent = total + ' Kunden';
+                emp.style.display = 'none';
+            }
+        }
 
-        document.addEventListener('DOMContentLoaded', function () {{
-            document.getElementById('search-sap').addEventListener('input', applyExportSearch);
-            document.getElementById('search-csb').addEventListener('input', applyExportSearch);
-            applyExportSearch();
-        }});
+        function stepMatch(dir) {
+            if (matches.length === 0) return;
+            highlight(matches[matchIdx], false);
+            matchIdx = (matchIdx + dir + matches.length) % matches.length;
+            highlight(matches[matchIdx], true);
+            scrollTo(matches[matchIdx]);
+            document.getElementById('search-result-label').textContent =
+                (matchIdx + 1) + ' / ' + matches.length + ' Treffer';
+        }
+
+        function resetSearch() {
+            document.getElementById('search-input').value = '';
+            applySearch();
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            buildIndex();
+            document.getElementById('search-input').addEventListener('input', applySearch);
+            document.getElementById('btn-prev').addEventListener('click', function(){ stepMatch(-1); });
+            document.getElementById('btn-next').addEventListener('click', function(){ stepMatch(1); });
+            document.getElementById('btn-reset').addEventListener('click', resetSearch);
+
+            // Keyboard: Enter = next, Shift+Enter = prev, Escape = reset
+            document.getElementById('search-input').addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') { e.preventDefault(); stepMatch(e.shiftKey ? -1 : 1); }
+                if (e.key === 'Escape') { resetSearch(); }
+            });
+
+            // Initial count
+            var lbl = document.getElementById('search-result-label');
+            lbl.textContent = entries.length + ' Kunden';
+        });
+    })();
     </script>
     """
 
