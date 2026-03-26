@@ -1,16 +1,15 @@
-import json
 import html
+import io
+import json
 from datetime import datetime
-from typing import Dict, List, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 
-# ============================================================
-# STREAMLIT PAGE CONFIG
-# ============================================================
 st.set_page_config(
     page_title="Sendeplan-Generator",
     page_icon="📦",
@@ -19,92 +18,6 @@ st.set_page_config(
 )
 
 
-# ============================================================
-# 1) HARDCODED DATENQUELLEN
-#    HIER DIE ECHTEN EXCEL-WERTE EINFÜGEN
-# ============================================================
-# WICHTIG:
-# - Bitte die Listen unten direkt mit deinen echten Datensätzen füllen.
-# - Die Schlüssel entsprechen bewusst den Excel-Spaltenbuchstaben.
-# - Keine automatische Spaltenerkennung: nur diese Felder werden verwendet.
-
-KUNDEN_DATA: List[Dict[str, str]] = [
-    # --- Beispielzeilen ---
-    {
-        "A": "Max Mustermann",      # Fachberater
-        "I": "2881",               # CSB-Nr
-        "J": "1001",               # SAP-Nr (Key)
-        "K": "Musterkunde Nord",   # Name
-        "L": "Hafenstraße 1",      # Straße
-        "M": "24534",              # PLZ
-        "N": "Neumünster",         # Ort
-    },
-    {
-        "A": "Erika Beispiel",
-        "I": "1884",
-        "J": "1002",
-        "K": "Beispielmarkt Süd",
-        "L": "Industrieweg 7",
-        "M": "19370",
-        "N": "Parchim",
-    },
-    # --------------------------------------------------------
-    # HIER 500+ ZEILEN EINFÜGEN
-    # {
-    #     "A": "...",
-    #     "I": "...",
-    #     "J": "...",
-    #     "K": "...",
-    #     "L": "...",
-    #     "M": "...",
-    #     "N": "...",
-    # },
-]
-
-SAP_DATA: List[Dict[str, str]] = [
-    # A: SAP-Nr | O: Liefertyp_ID | I: Bestellzeitende | H: Bestelltag | Y: Rahmentour_Raw
-    {"A": "1001", "O": "LT01", "I": "13:00", "H": "1", "Y": "M12345678-01"},
-    {"A": "1001", "O": "LT02", "I": "17:00", "H": "3", "Y": "M12345678-02"},
-    {"A": "1002", "O": "LT01", "I": "12:00", "H": "2", "Y": "N87654321-01"},
-    # HIER 500+ ZEILEN EINFÜGEN
-    # {"A": "...", "O": "...", "I": "...", "H": "...", "Y": "..."},
-]
-
-TRANSPORT_DATA: List[Dict[str, str]] = [
-    # A: Liefertyp_ID | C: Liefertyp_Name
-    {"A": "LT01", "C": "Lagerware TP 1001, 3001"},
-    {"A": "LT02", "C": "Frische"},
-    {"A": "LT03", "C": "Tiefkühl"},
-    # HIER WEITERE ZEILEN EINFÜGEN
-]
-
-KISOFT_DATA: List[Dict[str, str]] = [
-    # Mapping-Key: "SAP Rahmentour" = "00" + erste 8 Stellen von Rahmentour_Raw
-    {
-        "SAP Rahmentour": "00M1234567",
-        "CSB Tournummer": "2881",
-        "Verladetor": "Tor 2",
-    },
-    {
-        "SAP Rahmentour": "00N8765432",
-        "CSB Tournummer": "1884",
-        "Verladetor": "Tor 5",
-    },
-    # HIER WEITERE ZEILEN EINFÜGEN
-]
-
-KOSTENSTELLEN_DATA: List[Dict[str, str]] = [
-    # Range-Lookup über SAP-Nr
-    # sap_von | sap_bis | tourengruppe | leiter
-    {"sap_von": "1001", "sap_bis": "1046", "tourengruppe": "1001-1046", "leiter": "Leitung Nord"},
-    {"sap_von": "2001", "sap_bis": "2046", "tourengruppe": "2001-2046", "leiter": "Leitung Süd"},
-    # HIER WEITERE BEREICHE EINFÜGEN
-]
-
-
-# ============================================================
-# 2) KONSTANTEN UND HILFSWERTE
-# ============================================================
 WOCHENTAGE = {
     1: "Montag",
     2: "Dienstag",
@@ -116,39 +29,54 @@ WOCHENTAGE = {
 
 KATEGORIEN = ["Alle", "Malchow", "NMS", "MK", "Direkt"]
 
-REQUIRED_KUNDEN_COLUMNS = ["A", "I", "J", "K", "L", "M", "N"]
-REQUIRED_SAP_COLUMNS = ["A", "O", "I", "H", "Y"]
-REQUIRED_TRANSPORT_COLUMNS = ["A", "C"]
-REQUIRED_KISOFT_COLUMNS = ["SAP Rahmentour", "CSB Tournummer", "Verladetor"]
-REQUIRED_KOSTENSTELLEN_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "leiter"]
+UPLOAD_CONFIG = {
+    "kunden": {
+        "label": "Kundenliste hochladen",
+        "help": "Verwendet feste Excel-Spalten: A, I, J, K, L, M, N",
+        "mapping": {
+            "Fachberater": "A",
+            "CSB_Nr": "I",
+            "SAP_Nr": "J",
+            "Name": "K",
+            "Strasse": "L",
+            "PLZ": "M",
+            "Ort": "N",
+        },
+        "required": ["Fachberater", "CSB_Nr", "SAP_Nr", "Name", "Strasse", "PLZ", "Ort"],
+        "key": "SAP_Nr",
+    },
+    "sap": {
+        "label": "SAP-Datei hochladen",
+        "help": "Verwendet feste Excel-Spalten: A, H, I, O, Y",
+        "mapping": {
+            "SAP_Nr": "A",
+            "Bestelltag": "H",
+            "Bestellzeitende": "I",
+            "Liefertyp_ID": "O",
+            "Rahmentour_Raw": "Y",
+        },
+        "required": ["SAP_Nr", "Bestelltag", "Bestellzeitende", "Liefertyp_ID", "Rahmentour_Raw"],
+        "key": "SAP_Nr",
+    },
+    "transport": {
+        "label": "Transportgruppen hochladen",
+        "help": "Verwendet feste Excel-Spalten: A, C",
+        "mapping": {
+            "Liefertyp_ID": "A",
+            "Liefertyp_Name": "C",
+        },
+        "required": ["Liefertyp_ID", "Liefertyp_Name"],
+        "key": "Liefertyp_ID",
+    },
+}
+
+KISOFT_REQUIRED_COLUMNS = ["SAP Rahmentour", "CSB Tournummer", "Verladetor"]
+KOSTENSTELLEN_REQUIRED_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "leiter"]
 
 
 # ============================================================
-# 3) DATENLADUNG UND VALIDIERUNG
+# HILFSFUNKTIONEN
 # ============================================================
-@st.cache_data(show_spinner=False)
-def load_raw_data() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    df_kunden = pd.DataFrame(KUNDEN_DATA)
-    df_sap = pd.DataFrame(SAP_DATA)
-    df_transport = pd.DataFrame(TRANSPORT_DATA)
-    df_kisoft = pd.DataFrame(KISOFT_DATA)
-    df_kostenstellen = pd.DataFrame(KOSTENSTELLEN_DATA)
-
-    validate_required_columns(df_kunden, REQUIRED_KUNDEN_COLUMNS, "df_kunden")
-    validate_required_columns(df_sap, REQUIRED_SAP_COLUMNS, "df_sap")
-    validate_required_columns(df_transport, REQUIRED_TRANSPORT_COLUMNS, "df_transport")
-    validate_required_columns(df_kisoft, REQUIRED_KISOFT_COLUMNS, "df_kisoft")
-    validate_required_columns(df_kostenstellen, REQUIRED_KOSTENSTELLEN_COLUMNS, "df_kostenstellen")
-
-    return df_kunden, df_sap, df_transport, df_kisoft, df_kostenstellen
-
-
-def validate_required_columns(df: pd.DataFrame, required_columns: List[str], name: str) -> None:
-    missing = [col for col in required_columns if col not in df.columns]
-    if missing:
-        raise ValueError(f"{name} fehlt Pflichtspalten: {', '.join(missing)}")
-
-
 def normalize_text(value) -> str:
     if pd.isna(value):
         return ""
@@ -163,7 +91,7 @@ def normalize_digits(value) -> str:
 
 def day_name_from_number(value) -> str:
     try:
-        return WOCHENTAGE.get(int(value), "Unbekannt")
+        return WOCHENTAGE.get(int(str(value).strip()), "Unbekannt")
     except (TypeError, ValueError):
         return "Unbekannt"
 
@@ -189,13 +117,170 @@ def classify_customer(rahmentour_raw: str, csb_nr: str) -> str:
     return "Direkt"
 
 
+def validate_required_columns(df: pd.DataFrame, required_columns: List[str], name: str) -> None:
+    missing = [col for col in required_columns if col not in df.columns]
+    if missing:
+        raise ValueError(f"{name} fehlt Pflichtspalten: {', '.join(missing)}")
+
+
+def excel_column_to_index(column_letter: str) -> int:
+    result = 0
+    for char in column_letter.upper():
+        if not char.isalpha():
+            raise ValueError(f"Ungültiger Spaltenbuchstabe: {column_letter}")
+        result = result * 26 + (ord(char) - ord("A") + 1)
+    return result - 1
+
+
+def read_upload_to_raw_dataframe(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    suffix = Path(filename).suffix.lower()
+
+    if suffix == ".csv":
+        errors = []
+        for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
+            try:
+                return pd.read_csv(
+                    io.BytesIO(file_bytes),
+                    sep=csv_separator,
+                    header=None,
+                    dtype=str,
+                    encoding=encoding,
+                    keep_default_na=False,
+                )
+            except Exception as exc:  # pragma: no cover
+                errors.append(f"{encoding}: {exc}")
+        raise ValueError(f"CSV konnte nicht gelesen werden. Versuchte Encodings: {' | '.join(errors)}")
+
+    if suffix in {".xlsx", ".xls", ".xlsm"}:
+        return pd.read_excel(
+            io.BytesIO(file_bytes),
+            header=None,
+            dtype=str,
+        )
+
+    raise ValueError(f"Nicht unterstütztes Dateiformat: {suffix}")
+
+
+def extract_columns_by_letter(raw_df: pd.DataFrame, mapping: Dict[str, str], dataset_name: str) -> pd.DataFrame:
+    extracted: Dict[str, pd.Series] = {}
+    for target_name, column_letter in mapping.items():
+        column_index = excel_column_to_index(column_letter)
+        if column_index >= raw_df.shape[1]:
+            raise ValueError(
+                f"{dataset_name}: benötigte Spalte {column_letter} ist nicht vorhanden. "
+                f"Gefundene Spaltenanzahl: {raw_df.shape[1]}"
+            )
+        extracted[target_name] = raw_df.iloc[:, column_index]
+    return pd.DataFrame(extracted)
+
+
+def cleanup_dataframe(df: pd.DataFrame, key_column: str) -> pd.DataFrame:
+    result = df.copy()
+    for column in result.columns:
+        result[column] = result[column].map(normalize_text)
+
+    result = result.replace("", pd.NA).dropna(how="all").fillna("")
+    result = result[result[key_column].map(normalize_text) != ""].copy()
+
+    if not result.empty:
+        first_key = normalize_text(result.iloc[0][key_column]).lower()
+        header_like_tokens = {
+            key_column.lower(),
+            key_column.lower().replace("_", " "),
+            "sap",
+            "sap-nr",
+            "sap nr",
+            "liefertyp_id",
+            "liefertyp id",
+            "sap rahmentour",
+            "sap_von",
+            "sap von",
+            "csb tournummer",
+        }
+        if first_key in header_like_tokens:
+            result = result.iloc[1:].copy()
+
+    return result.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str, dataset_key: str) -> pd.DataFrame:
+    config = UPLOAD_CONFIG[dataset_key]
+    raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
+    structured_df = extract_columns_by_letter(raw_df, config["mapping"], config["label"])
+    structured_df = cleanup_dataframe(structured_df, config["key"])
+    validate_required_columns(structured_df, config["required"], config["label"])
+    return structured_df
+
+
+@st.cache_data(show_spinner=False)
+def load_kisoft_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
+
+    if raw_df.shape[1] >= 3:
+        df = raw_df.iloc[:, :3].copy()
+        df.columns = KISOFT_REQUIRED_COLUMNS
+        df = cleanup_dataframe(df, "SAP Rahmentour")
+        first_row_values = {normalize_text(value).lower() for value in df.head(1).iloc[0].tolist()} if not df.empty else set()
+        if first_row_values & {"sap rahmentour", "csb tournummer", "verladetor"}:
+            df = df.iloc[1:].reset_index(drop=True)
+    else:
+        raise ValueError("Kisoft-Datei muss mindestens 3 Spalten enthalten.")
+
+    for column in KISOFT_REQUIRED_COLUMNS:
+        df[column] = df[column].map(normalize_text)
+
+    validate_required_columns(df, KISOFT_REQUIRED_COLUMNS, "Kisoft-Datei")
+    return df
+
+
+@st.cache_data(show_spinner=False)
+def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    suffix = Path(filename).suffix.lower()
+
+    if suffix == ".csv":
+        for encoding in ["utf-8-sig", "utf-8", "latin1", "cp1252"]:
+            try:
+                df = pd.read_csv(
+                    io.BytesIO(file_bytes),
+                    sep=csv_separator,
+                    dtype=str,
+                    encoding=encoding,
+                    keep_default_na=False,
+                )
+                break
+            except Exception:
+                df = None
+        if df is None:
+            raise ValueError("Kostenstellen-CSV konnte nicht gelesen werden.")
+    else:
+        df = pd.read_excel(io.BytesIO(file_bytes), dtype=str)
+
+    df.columns = [normalize_text(column) for column in df.columns]
+    missing = [col for col in KOSTENSTELLEN_REQUIRED_COLUMNS if col not in df.columns]
+
+    if missing:
+        raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
+        if raw_df.shape[1] < 4:
+            raise ValueError("Kostenstellen-Datei benötigt mindestens 4 Spalten.")
+        df = raw_df.iloc[:, :4].copy()
+        df.columns = KOSTENSTELLEN_REQUIRED_COLUMNS
+
+    df = cleanup_dataframe(df, "sap_von")
+    for column in KOSTENSTELLEN_REQUIRED_COLUMNS:
+        df[column] = df[column].map(normalize_text)
+
+    validate_required_columns(df, KOSTENSTELLEN_REQUIRED_COLUMNS, "Kostenstellen-Datei")
+    return df
+
+
 # ============================================================
-# 4) RANGE LOOKUP KOSTENSTELLEN
+# LOOKUP UND AUFBEREITUNG
 # ============================================================
 def apply_kostenstellen_lookup(df_base: pd.DataFrame, df_kostenstellen: pd.DataFrame) -> pd.DataFrame:
     table = df_kostenstellen.copy()
-    table["sap_von_num"] = pd.to_numeric(table["sap_von"], errors="coerce")
-    table["sap_bis_num"] = pd.to_numeric(table["sap_bis"], errors="coerce")
+    table["sap_von_num"] = pd.to_numeric(table["sap_von"].map(normalize_digits), errors="coerce")
+    table["sap_bis_num"] = pd.to_numeric(table["sap_bis"].map(normalize_digits), errors="coerce")
 
     def lookup_row(sap_nr: str) -> pd.Series:
         sap_num = pd.to_numeric(normalize_digits(sap_nr), errors="coerce")
@@ -207,63 +292,50 @@ def apply_kostenstellen_lookup(df_base: pd.DataFrame, df_kostenstellen: pd.DataF
             return pd.Series({"Tourengruppe": "", "Leiter": ""})
 
         row = match.iloc[0]
-        return pd.Series({
-            "Tourengruppe": normalize_text(row["tourengruppe"]),
-            "Leiter": normalize_text(row["leiter"]),
-        })
+        return pd.Series(
+            {
+                "Tourengruppe": normalize_text(row["tourengruppe"]),
+                "Leiter": normalize_text(row["leiter"]),
+            }
+        )
 
     result = df_base.copy()
     result[["Tourengruppe", "Leiter"]] = result["SAP_Nr"].apply(lookup_row)
     return result
 
 
-# ============================================================
-# 5) DATENAUFBEREITUNG
-# ============================================================
 @st.cache_data(show_spinner=False)
-def prepare_data() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
-    df_kunden_raw, df_sap_raw, df_transport_raw, df_kisoft_raw, df_kostenstellen_raw = load_raw_data()
+def prepare_dataframes(
+    kunden_bytes: bytes,
+    kunden_name: str,
+    sap_bytes: bytes,
+    sap_name: str,
+    transport_bytes: bytes,
+    transport_name: str,
+    kisoft_bytes: bytes,
+    kisoft_name: str,
+    kostenstellen_bytes: bytes,
+    kostenstellen_name: str,
+    csv_separator: str,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
+    df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
+    df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
+    df_transport = load_structured_upload(transport_bytes, transport_name, csv_separator, "transport")
+    df_kisoft = load_kisoft_upload(kisoft_bytes, kisoft_name, csv_separator)
+    df_kostenstellen = load_kostenstellen_upload(kostenstellen_bytes, kostenstellen_name, csv_separator)
 
-    df_kunden = df_kunden_raw.rename(columns={
-        "A": "Fachberater",
-        "I": "CSB_Nr",
-        "J": "SAP_Nr",
-        "K": "Name",
-        "L": "Strasse",
-        "M": "PLZ",
-        "N": "Ort",
-    }).copy()
+    for column in df_kunden.columns:
+        df_kunden[column] = df_kunden[column].map(normalize_text)
 
-    df_sap = df_sap_raw.rename(columns={
-        "A": "SAP_Nr",
-        "O": "Liefertyp_ID",
-        "I": "Bestellzeitende",
-        "H": "Bestelltag",
-        "Y": "Rahmentour_Raw",
-    }).copy()
+    for column in df_sap.columns:
+        df_sap[column] = df_sap[column].map(normalize_text)
 
-    df_transport = df_transport_raw.rename(columns={
-        "A": "Liefertyp_ID",
-        "C": "Liefertyp_Name",
-    }).copy()
+    for column in df_transport.columns:
+        df_transport[column] = df_transport[column].map(normalize_text)
 
-    df_kisoft = df_kisoft_raw.copy()
-    df_kostenstellen = df_kostenstellen_raw.copy()
+    for column in df_kisoft.columns:
+        df_kisoft[column] = df_kisoft[column].map(normalize_text)
 
-    for col in ["SAP_Nr", "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater"]:
-        df_kunden[col] = df_kunden[col].map(normalize_text)
-
-    for col in ["SAP_Nr", "Liefertyp_ID", "Bestellzeitende", "Bestelltag", "Rahmentour_Raw"]:
-        df_sap[col] = df_sap[col].map(normalize_text)
-
-    df_transport["Liefertyp_ID"] = df_transport["Liefertyp_ID"].map(normalize_text)
-    df_transport["Liefertyp_Name"] = df_transport["Liefertyp_Name"].map(normalize_text)
-
-    df_kisoft["SAP Rahmentour"] = df_kisoft["SAP Rahmentour"].map(normalize_text)
-    df_kisoft["CSB Tournummer"] = df_kisoft["CSB Tournummer"].map(normalize_text)
-    df_kisoft["Verladetor"] = df_kisoft["Verladetor"].map(normalize_text)
-
-    # SAP-Zeilen anreichern
     df_sap["Kisoft_Key"] = df_sap["Rahmentour_Raw"].map(build_kisoft_key)
     df_sap["Bestelltag_Name"] = df_sap["Bestelltag"].map(day_name_from_number)
 
@@ -275,10 +347,6 @@ def prepare_data() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
         how="left",
     )
 
-    # Liefertag:
-    # 1. bevorzugt aus erster Ziffer der Kisoft-CSB-Tournummer
-    # 2. ansonsten aus erster Ziffer der Tourengruppe
-    # 3. ansonsten Fallback auf Bestelltag
     def infer_liefertag(row: pd.Series) -> str:
         csb_tour = normalize_digits(row.get("CSB Tournummer", ""))
         if csb_tour and csb_tour[0].isdigit():
@@ -287,27 +355,32 @@ def prepare_data() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
                 return WOCHENTAGE[day]
         return row.get("Bestelltag_Name", "Unbekannt")
 
-    kunden_basis = df_kunden.merge(df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates(subset=["SAP_Nr"]), on="SAP_Nr", how="left")
+    kunden_basis = df_kunden.merge(
+        df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates(subset=["SAP_Nr"]),
+        on="SAP_Nr",
+        how="left",
+    )
     kunden_basis["Kategorie"] = kunden_basis.apply(
         lambda row: classify_customer(row.get("Rahmentour_Raw", ""), row.get("CSB_Nr", "")),
         axis=1,
     )
-
     kunden_basis = apply_kostenstellen_lookup(kunden_basis, df_kostenstellen)
 
     plan_rows = df_sap.merge(
-        kunden_basis[[
-            "SAP_Nr",
-            "CSB_Nr",
-            "Name",
-            "Strasse",
-            "PLZ",
-            "Ort",
-            "Fachberater",
-            "Kategorie",
-            "Tourengruppe",
-            "Leiter",
-        ]],
+        kunden_basis[
+            [
+                "SAP_Nr",
+                "CSB_Nr",
+                "Name",
+                "Strasse",
+                "PLZ",
+                "Ort",
+                "Fachberater",
+                "Kategorie",
+                "Tourengruppe",
+                "Leiter",
+            ]
+        ],
         on="SAP_Nr",
         how="left",
     )
@@ -315,7 +388,6 @@ def prepare_data() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
     plan_rows["Liefertag"] = plan_rows.apply(infer_liefertag, axis=1)
     plan_rows["Sortiment"] = plan_rows["Liefertyp_Name"].fillna("")
     plan_rows["Bestellzeitende"] = plan_rows["Bestellzeitende"].fillna("")
-
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
     plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("")
 
@@ -326,7 +398,7 @@ def prepare_data() -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
 
 
 # ============================================================
-# 6) FILTER UND SUCHLOGIK
+# FILTER
 # ============================================================
 def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str) -> pd.DataFrame:
     result = df_customers.copy()
@@ -341,12 +413,11 @@ def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str
             | result["Name"].str.lower().str.contains(search, na=False)
         ]
 
-    result = result.sort_values(["Name", "SAP_Nr"], na_position="last").reset_index(drop=True)
-    return result
+    return result.sort_values(["Name", "SAP_Nr"], na_position="last").reset_index(drop=True)
 
 
 # ============================================================
-# 7) HTML / CSS / DRUCKLAYOUT
+# HTML UND CSS
 # ============================================================
 def app_css() -> str:
     return """
@@ -355,7 +426,6 @@ def app_css() -> str:
             --paper-width: 210mm;
             --paper-min-height: 297mm;
             --border-color: #aaaaaa;
-            --soft-bg: #f3f5f7;
             --muted: #5f6b76;
             --accent: #1f4e79;
         }
@@ -574,10 +644,10 @@ def render_plan_table(rows: pd.DataFrame) -> str:
         return "<p>Keine Planzeilen vorhanden.</p>"
 
     ordered = rows.sort_values(["SortKey_Bestelltag", "SortKey_Sortiment", "Bestellzeitende"])
+    body_rows = []
 
-    trs = []
     for _, row in ordered.iterrows():
-        trs.append(
+        body_rows.append(
             f"""
             <tr>
                 <td>{html.escape(normalize_text(row.get('Liefertag', '')))}</td>
@@ -589,26 +659,26 @@ def render_plan_table(rows: pd.DataFrame) -> str:
         )
 
     return f"""
-        <table class="plan-table">
-            <thead>
-                <tr>
-                    <th>Liefertag</th>
-                    <th>Sortiment</th>
-                    <th>Bestelltag</th>
-                    <th>Bestellzeitende</th>
-                </tr>
-            </thead>
-            <tbody>
-                {''.join(trs)}
-            </tbody>
-        </table>
+    <table class="plan-table">
+        <thead>
+            <tr>
+                <th>Liefertag</th>
+                <th>Sortiment</th>
+                <th>Bestelltag</th>
+                <th>Bestellzeitende</th>
+            </tr>
+        </thead>
+        <tbody>
+            {''.join(body_rows)}
+        </tbody>
+    </table>
     """
 
 
 def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> str:
     sap_nr = normalize_text(customer.get("SAP_Nr", ""))
     name = normalize_text(customer.get("Name", ""))
-    address = " ".join(filter(None, [normalize_text(customer.get("Strasse", ""))]))
+    address = normalize_text(customer.get("Strasse", ""))
     plz_ort = " ".join(filter(None, [normalize_text(customer.get("PLZ", "")), normalize_text(customer.get("Ort", ""))]))
     category = normalize_text(customer.get("Kategorie", ""))
     csb_nr = normalize_text(customer.get("CSB_Nr", ""))
@@ -616,8 +686,16 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> st
     tourengruppe = normalize_text(customer.get("Tourengruppe", ""))
     leiter = normalize_text(customer.get("Leiter", ""))
 
-    verladetor = normalize_text(customer_rows["Verladetor"].dropna().iloc[0]) if not customer_rows.empty and customer_rows["Verladetor"].dropna().any() else ""
-    rahmentour = normalize_text(customer_rows["Rahmentour_Raw"].dropna().iloc[0]) if not customer_rows.empty and customer_rows["Rahmentour_Raw"].dropna().any() else normalize_text(customer.get("Rahmentour_Raw", ""))
+    verladetor = ""
+    rahmentour = normalize_text(customer.get("Rahmentour_Raw", ""))
+
+    if not customer_rows.empty:
+        verladetor_series = customer_rows["Verladetor"].dropna().astype(str).str.strip()
+        rahmentour_series = customer_rows["Rahmentour_Raw"].dropna().astype(str).str.strip()
+        if not verladetor_series.empty:
+            verladetor = normalize_text(verladetor_series.iloc[0])
+        if not rahmentour_series.empty:
+            rahmentour = normalize_text(rahmentour_series.iloc[0])
 
     return f"""
     <div class="paper">
@@ -634,38 +712,14 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame) -> st
         </div>
 
         <div class="meta-grid">
-            <div class="meta-card">
-                <span class="meta-label">SAP-Nummer</span>
-                <span class="meta-value">{html.escape(sap_nr)}</span>
-            </div>
-            <div class="meta-card">
-                <span class="meta-label">CSB-Nummer</span>
-                <span class="meta-value">{html.escape(csb_nr)}</span>
-            </div>
-            <div class="meta-card">
-                <span class="meta-label">Kunde</span>
-                <span class="meta-value">{html.escape(name)}</span>
-            </div>
-            <div class="meta-card">
-                <span class="meta-label">Fachberater</span>
-                <span class="meta-value">{html.escape(fachberater)}</span>
-            </div>
-            <div class="meta-card">
-                <span class="meta-label">Adresse</span>
-                <span class="meta-value">{html.escape(address)}</span>
-            </div>
-            <div class="meta-card">
-                <span class="meta-label">PLZ / Ort</span>
-                <span class="meta-value">{html.escape(plz_ort)}</span>
-            </div>
-            <div class="meta-card">
-                <span class="meta-label">Tourengruppe</span>
-                <span class="meta-value">{html.escape(tourengruppe)}</span>
-            </div>
-            <div class="meta-card">
-                <span class="meta-label">Leiter</span>
-                <span class="meta-value">{html.escape(leiter)}</span>
-            </div>
+            <div class="meta-card"><span class="meta-label">SAP-Nummer</span><span class="meta-value">{html.escape(sap_nr)}</span></div>
+            <div class="meta-card"><span class="meta-label">CSB-Nummer</span><span class="meta-value">{html.escape(csb_nr)}</span></div>
+            <div class="meta-card"><span class="meta-label">Kunde</span><span class="meta-value">{html.escape(name)}</span></div>
+            <div class="meta-card"><span class="meta-label">Fachberater</span><span class="meta-value">{html.escape(fachberater)}</span></div>
+            <div class="meta-card"><span class="meta-label">Adresse</span><span class="meta-value">{html.escape(address)}</span></div>
+            <div class="meta-card"><span class="meta-label">PLZ / Ort</span><span class="meta-value">{html.escape(plz_ort)}</span></div>
+            <div class="meta-card"><span class="meta-label">Tourengruppe</span><span class="meta-value">{html.escape(tourengruppe)}</span></div>
+            <div class="meta-card"><span class="meta-label">Leiter</span><span class="meta-value">{html.escape(leiter)}</span></div>
         </div>
 
         {render_plan_table(customer_rows)}
@@ -697,19 +751,19 @@ def render_separator_page(customer: pd.Series) -> str:
 
 
 def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True) -> str:
-    docs: List[str] = []
+    docs: List[str] = [
+        render_cover_page(
+            title="Sendeplan-Generator",
+            subtitle="Gesamtplan",
+            lines=[
+                f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr",
+                f"Kundenanzahl: {len(customers)}",
+                "Enthält Deckblatt, Zwischenseiten und Kundenseiten.",
+            ],
+        )
+    ]
 
-    docs.append(render_cover_page(
-        title="Sendeplan-Generator",
-        subtitle="Gesamtplan",
-        lines=[
-            f"Erstellt am {datetime.now().strftime('%d.%m.%Y %H:%M')} Uhr",
-            f"Kundenanzahl: {len(customers)}",
-            "Enthält Deckblatt, Zwischenseiten und Kundenseiten.",
-        ],
-    ))
-
-    for idx, (_, customer) in enumerate(customers.iterrows(), start=1):
+    for _, customer in customers.iterrows():
         rows = plan_rows[plan_rows["SAP_Nr"] == customer["SAP_Nr"]].copy()
         if include_separators:
             docs.append(render_separator_page(customer))
@@ -779,21 +833,6 @@ def render_print_buttons(single_html: str, bulk_html: str) -> None:
     )
 
 
-# ============================================================
-# 8) STREAMLIT UI
-# ============================================================
-def init_session_state() -> None:
-    if "category_filter" not in st.session_state:
-        st.session_state.category_filter = "Alle"
-
-    if "selected_sap" not in st.session_state:
-        st.session_state.selected_sap = ""
-
-
-def set_category(category: str) -> None:
-    st.session_state.category_filter = category
-
-
 @st.cache_data(show_spinner=False)
 def build_option_labels(df_customers: pd.DataFrame) -> Dict[str, str]:
     return {
@@ -802,19 +841,100 @@ def build_option_labels(df_customers: pd.DataFrame) -> Dict[str, str]:
     }
 
 
-# ============================================================
-# 9) APP START
-# ============================================================
+def init_session_state() -> None:
+    if "category_filter" not in st.session_state:
+        st.session_state.category_filter = "Alle"
+    if "selected_sap" not in st.session_state:
+        st.session_state.selected_sap = ""
+
+
+def set_category(category: str) -> None:
+    st.session_state.category_filter = category
+
+
+def all_required_uploads_present(upload_map: Dict[str, Optional[st.runtime.uploaded_file_manager.UploadedFile]]) -> bool:
+    return all(upload_map.values())
+
+
 def main() -> None:
     init_session_state()
     st.markdown(app_css(), unsafe_allow_html=True)
 
-    customers_df, plan_rows_df, counts = prepare_data()
-
     st.title("📦 Sendeplan-Generator")
-    st.caption("Hardgecodete Streamlit-App für Kunden-, SAP-, Transport-, Kisoft- und Kostenstellenlogik.")
+    st.caption("Dateien hochladen, Sendeplan erzeugen und HTML zum Download bereitstellen.")
 
     with st.sidebar:
+        st.header("Quelldateien")
+        csv_separator = st.text_input("CSV-Trennzeichen", value=";", max_chars=1)
+
+        kunden_file = st.file_uploader(
+            "Kundenliste",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Feste Spalten: A, I, J, K, L, M, N",
+        )
+        sap_file = st.file_uploader(
+            "SAP-Datei",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Feste Spalten: A, H, I, O, Y",
+        )
+        transport_file = st.file_uploader(
+            "Transportgruppen",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Feste Spalten: A, C",
+        )
+        kisoft_file = st.file_uploader(
+            "Kisoft-Datei",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            help="Benötigte Felder: SAP Rahmentour, CSB Tournummer, Verladetor",
+        )
+        kostenstellen_file = st.file_uploader(
+            "Kostenstellen-Datei",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            help="Benötigte Felder: sap_von, sap_bis, tourengruppe, leiter",
+        )
+
+        upload_map = {
+            "kunden": kunden_file,
+            "sap": sap_file,
+            "transport": transport_file,
+            "kisoft": kisoft_file,
+            "kostenstellen": kostenstellen_file,
+        }
+
+        if not all_required_uploads_present(upload_map):
+            st.info("Bitte alle fünf Quelldateien hochladen. Danach werden Vorschau, Druck und HTML-Download freigeschaltet.")
+            st.markdown("**Verwendete Regeln**")
+            st.markdown(
+                """
+                - Kundenliste über feste Spalten **A, I, J, K, L, M, N**
+                - SAP über feste Spalten **A, H, I, O, Y**
+                - Transportgruppen über feste Spalten **A, C**
+                - Kisoft über **SAP Rahmentour**, **CSB Tournummer**, **Verladetor**
+                - Kostenstellen über **sap_von**, **sap_bis**, **tourengruppe**, **leiter**
+                """
+            )
+            st.stop()
+
+    try:
+        customers_df, plan_rows_df, counts = prepare_dataframes(
+            kunden_file.getvalue(),
+            kunden_file.name,
+            sap_file.getvalue(),
+            sap_file.name,
+            transport_file.getvalue(),
+            transport_file.name,
+            kisoft_file.getvalue(),
+            kisoft_file.name,
+            kostenstellen_file.getvalue(),
+            kostenstellen_file.name,
+            csv_separator or ";",
+        )
+    except Exception as exc:
+        st.error(f"Die hochgeladenen Dateien konnten nicht verarbeitet werden: {exc}")
+        st.stop()
+
+    with st.sidebar:
+        st.divider()
         st.header("Filter")
         st.text_input(
             "Suche nach SAP-Nummer oder Name",
@@ -858,17 +978,14 @@ def main() -> None:
             st.session_state.selected_sap = selected_sap
         else:
             st.session_state.selected_sap = ""
-            selected_sap = ""
 
         st.divider()
-        st.subheader("Download")
-
-        export_df = filtered_customers.copy()
-        export_html = build_full_document_html(export_df, plan_rows_df, include_separators=True)
+        st.subheader("HTML-Export")
+        export_html = build_full_document_html(filtered_customers, plan_rows_df, include_separators=True)
         filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
 
         st.download_button(
-            label="HTML-Export herunterladen",
+            label="HTML-Datei herunterladen",
             data=export_html,
             file_name=f"sendeplan_{filename_suffix}.html",
             mime="text/html",
@@ -882,6 +999,17 @@ def main() -> None:
         st.metric("Kunden", len(customers_df))
         st.metric("Planzeilen", len(plan_rows_df))
         st.metric("Treffer im Filter", len(filtered_customers))
+
+        st.markdown("### Uploads")
+        st.markdown(
+            f"""
+            - Kundenliste: **{kunden_file.name}**
+            - SAP: **{sap_file.name}**
+            - Transport: **{transport_file.name}**
+            - Kisoft: **{kisoft_file.name}**
+            - Kostenstellen: **{kostenstellen_file.name}**
+            """
+        )
 
         st.markdown("### Mapping-Regeln")
         st.markdown(
@@ -902,7 +1030,10 @@ def main() -> None:
             single_html = build_single_document_html(selected_customer, customer_rows)
             bulk_html = build_full_document_html(filtered_customers, plan_rows_df, include_separators=True)
 
-            st.markdown("<div class='print-note'>Druckfunktionen öffnen ein separates HTML-Dokument mit dem A4-Layout und starten dort den Browser-Druck.</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='print-note'>Einzeldruck und Massendruck öffnen ein separates HTML-Dokument mit A4-Layout und starten dort den Browser-Druck.</div>",
+                unsafe_allow_html=True,
+            )
             render_print_buttons(single_html, bulk_html)
             st.markdown(render_customer_plan(selected_customer, customer_rows), unsafe_allow_html=True)
         else:
@@ -914,37 +1045,6 @@ def main() -> None:
                 </div>
                 """,
                 unsafe_allow_html=True,
-            )
-
-        with st.expander("Code-Hinweise für die Datenpflege", expanded=False):
-            st.code(
-                """
-# 1) KUNDEN_DATA mit echten Excel-Zeilen füllen
-KUNDEN_DATA = [
-    {"A": "Fachberater", "I": "CSB", "J": "SAP", "K": "Name", "L": "Straße", "M": "PLZ", "N": "Ort"},
-]
-
-# 2) SAP_DATA mit echten SAP-Zeilen füllen
-SAP_DATA = [
-    {"A": "SAP", "O": "Liefertyp_ID", "I": "Bestellzeitende", "H": "Bestelltag", "Y": "Rahmentour_Raw"},
-]
-
-# 3) TRANSPORT_DATA füllen
-TRANSPORT_DATA = [
-    {"A": "Liefertyp_ID", "C": "Liefertyp_Name"},
-]
-
-# 4) KISOFT_DATA füllen
-KISOFT_DATA = [
-    {"SAP Rahmentour": "00XXXXXXXX", "CSB Tournummer": "2881", "Verladetor": "Tor 1"},
-]
-
-# 5) KOSTENSTELLEN_DATA füllen
-KOSTENSTELLEN_DATA = [
-    {"sap_von": "1001", "sap_bis": "1046", "tourengruppe": "1001-1046", "leiter": "Leitung Nord"},
-]
-                """,
-                language="python",
             )
 
 
