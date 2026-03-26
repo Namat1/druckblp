@@ -69,7 +69,7 @@ UPLOAD_CONFIG = {
     },
 }
 
-KISOFT_REQUIRED_COLUMNS = ["SAP Rahmentour", "CSB Tournummer", "Verladetor"]
+KISOFT_REQUIRED_COLUMNS = ["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor"]
 KOSTENSTELLEN_REQUIRED_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "kostenstelle", "leiter"]
 
 
@@ -214,22 +214,46 @@ def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str,
 
 @st.cache_data(show_spinner=False)
 def load_kisoft_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
+    """Liest die Kisoft-Datei.
+
+    Unterstuetzt zwei Formate:
+    - Mit Kopfzeile: Spalten werden per Name gefunden
+      (SAP Rahmentour, CSB Tournummer, Wochentag, Verladetor)
+    - Ohne Kopfzeile: feste Positionen 0, 1, 2, 4
+    """
     raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
 
     if raw_df.shape[1] < 3:
         raise ValueError("Kisoft-Datei muss mindestens 3 Spalten enthalten.")
 
-    df = raw_df.iloc[:, :3].copy()
-    df.columns = KISOFT_REQUIRED_COLUMNS
-    df = cleanup_dataframe(df, "SAP Rahmentour")
+    # Pruefen ob erste Zeile eine Kopfzeile ist
+    first_row = {normalize_text(v).lower() for v in raw_df.iloc[0].tolist()}
+    has_header = bool(first_row & {"sap rahmentour", "csb tournummer"})
 
-    if not df.empty:
-        first_row_values = {normalize_text(value).lower() for value in df.head(1).iloc[0].tolist()}
-        if first_row_values & {"sap rahmentour", "csb tournummer", "verladetor"}:
-            df = df.iloc[1:].reset_index(drop=True)
+    if has_header:
+        # Mit Kopfzeile: per Name lesen
+        raw_df.columns = [normalize_text(c) for c in raw_df.iloc[0]]
+        raw_df = raw_df.iloc[1:].reset_index(drop=True)
+        col_map = {c.lower(): c for c in raw_df.columns}
+        def get_col(name):
+            return raw_df[col_map[name.lower()]] if name.lower() in col_map else pd.Series([""] * len(raw_df))
+        df = pd.DataFrame({
+            "SAP Rahmentour": get_col("SAP Rahmentour"),
+            "CSB Tournummer": get_col("CSB Tournummer"),
+            "Wochentag":      get_col("Wochentag"),
+            "Verladetor":     get_col("Verladetor"),
+        })
+    else:
+        # Ohne Kopfzeile: feste Positionen
+        df = pd.DataFrame({
+            "SAP Rahmentour": raw_df.iloc[:, 0],
+            "CSB Tournummer": raw_df.iloc[:, 1],
+            "Wochentag":      raw_df.iloc[:, 2] if raw_df.shape[1] > 2 else "",
+            "Verladetor":     raw_df.iloc[:, 4] if raw_df.shape[1] > 4 else "",
+        })
 
-    for column in KISOFT_REQUIRED_COLUMNS:
-        df[column] = df[column].map(normalize_text)
+    df = df.fillna("").apply(lambda col: col.map(normalize_text))
+    df = df[df["SAP Rahmentour"] != ""].reset_index(drop=True)
 
     validate_required_columns(df, KISOFT_REQUIRED_COLUMNS, "Kisoft-Datei")
     return df
@@ -400,7 +424,7 @@ def prepare_dataframes(
 
     df_sap = df_sap.merge(df_transport, on="Liefertyp_ID", how="left")
     df_sap = df_sap.merge(
-        df_kisoft[["SAP Rahmentour", "CSB Tournummer", "Verladetor"]],
+        df_kisoft[["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor"]],
         left_on="Kisoft_Key",
         right_on="SAP Rahmentour",
         how="left",
@@ -410,11 +434,17 @@ def prepare_dataframes(
     df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID"], keep="first").copy()
 
     def infer_liefertag(row: pd.Series) -> str:
+        # 1. Wochentag direkt aus Kisoft (zuverlaessigste Quelle)
+        wochentag = normalize_text(row.get("Wochentag", ""))
+        if wochentag and wochentag.lower() not in ("", "nan"):
+            return wochentag.capitalize()
+        # 2. Erste Ziffer der CSB-Tournummer = Liefertag
         csb_tour = normalize_digits(row.get("CSB Tournummer", ""))
         if csb_tour and csb_tour[0].isdigit():
             day = int(csb_tour[0])
             if day in WOCHENTAGE:
                 return WOCHENTAGE[day]
+        # 3. Fallback: Bestelltag aus SAP
         return row.get("Bestelltag_Name", "Unbekannt")
 
     kunden_basis = df_kunden.merge(
