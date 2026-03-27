@@ -1366,11 +1366,15 @@ def render_plan_table(rows: pd.DataFrame) -> str:
 
 
 def logo_img_tag(logo_b64: str, logo_mime: str = "image/png") -> str:
-    """Gibt ein <img>-Tag zurueck. Base64 wird einmalig per JS gesetzt – nicht pro Seite."""
+    """Gibt ein <img>-Tag zurueck. Im Bulk-Export greift die CSS-content-Regel;
+    im Einzel-Export src direkt setzen. Beide haben class=doc-logo-img.
+    """
     if logo_b64:
         return (
-            '<img class="doc-logo-img" alt="NORDfrische Center" '
-            'style="max-width:44mm; max-height:20mm; width:auto; height:auto; display:block; margin-left:auto;">'
+            f'<img class="doc-logo-img" '
+            f'src="data:{logo_mime};base64,{logo_b64}" '
+            f'alt="NORDfrische Center" '
+            f'style="max-width:44mm; max-height:20mm; width:auto; height:auto; display:block; margin-left:auto;">'
         )
     # CSS-Fallback
     return """
@@ -1532,14 +1536,13 @@ def render_export_search_toolbar() -> str:
 
 
 def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png") -> str:
-    # Logo-Base64 einmalig im <head> einbetten, nicht pro Seite wiederholen
+    # Logo-Base64 einmalig im <head> als CSS einbetten – kein JS, kein file://-Problem
     if logo_b64:
         logo_head_script = (
-            f'<script>'  
-            f'window.__LOGO_SRC="data:{logo_mime};base64,{logo_b64}";'  
-            f'document.addEventListener("DOMContentLoaded",function(){{'  
-            f'document.querySelectorAll(".doc-logo-img").forEach(function(img){{img.src=window.__LOGO_SRC;}});'  
-            f'}});</script>'
+            f'<style>'
+            f'.doc-logo-img {{ content: url("data:{logo_mime};base64,{logo_b64}"); '
+            f'max-width:44mm; max-height:20mm; display:block; margin-left:auto; }}'
+            f'</style>'
         )
     else:
         logo_head_script = ""
@@ -1768,7 +1771,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     <html lang="de">
     <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=210mm, initial-scale=1.0" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Sendeplan-Export</title>
         {export_css()}
         {logo_head_script}
@@ -1792,7 +1795,7 @@ def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame,
     <html lang="de">
     <head>
         <meta charset="utf-8" />
-        <meta name="viewport" content="width=210mm, initial-scale=1.0" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Sendeplan {html.escape(normalize_text(customer.get('SAP_Nr', '')))}</title>
         {export_css()}
     </head>
