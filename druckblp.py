@@ -1409,14 +1409,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
 
     # Tourengruppe -> Subtitle (Standart / NMS / Malchow / MK …)
     kategorie = normalize_text(customer.get("Kategorie", ""))
-    subtitle_map = {
-        "Direkt":  "Standart",
-        "NMS":     "NMS",
-        "Malchow": "Malchow",
-        "MK":      "MK",
-        "SuL":     "SuL",
-    }
-    subtitle = subtitle_map.get(kategorie, kategorie or "Standart")
+    subtitle = "Standart"  # Immer Standart – per contenteditable änderbar
 
     tour_overview_html = render_tour_overview(customer_rows)
     plan_table_html    = render_plan_table(customer_rows)
@@ -1772,7 +1765,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             allEntries.forEach(function (e) { observer.observe(e); });
         });
 
-        function printCurrent() {
+        window.printCurrent = function printCurrent() {
             // Wenn Suche aktiv und genau 1 Treffer: diesen drucken
             // Sonst: aktuell sichtbaren Kunden im Viewport drucken
             var entries = Array.from(document.querySelectorAll(".customer-entry"));
@@ -1796,7 +1789,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             });
             window.print();
             entries.forEach(function (e) { e.classList.remove("print-hidden"); });
-        }
+        };
     })();
     </script>
     """
