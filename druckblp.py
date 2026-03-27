@@ -611,39 +611,33 @@ def prepare_dataframes(
 
     df_sap = df_sap.merge(df_transport, on="Liefertyp_ID", how="left")
 
-    # Kisoft vor dem Merge deduplizieren:
-    # Pro SAP Rahmentour nur den Eintrag behalten, bei dem die erste Ziffer der
-    # CSB Tournummer mit dem Wochentag übereinstimmt (1=Mo, 2=Di, ... 6=Sa).
-    # Damit werden Wochentag-Varianten (1999/2999/3999 derselben Tour) korrekt
-    # auf genau einen kanonischen Eintrag reduziert.
-    _WOCHENTAG_NUM = {"montag":1,"dienstag":2,"mittwoch":3,"donnerstag":4,"freitag":5,"samstag":6,"sonntag":7}
-    def _kisoft_rank(row):
-        csb   = normalize_digits(normalize_text(row.get("CSB Tournummer", "")))
-        wtag  = normalize_text(row.get("Wochentag", "")).lower()
-        if not csb or not csb[0].isdigit():
-            return 1
-        csb_day = int(csb[0])
-        kst_day = _WOCHENTAG_NUM.get(wtag, 0)
-        # Perfekter Match = Priorität 0, sonst 1
-        return 0 if csb_day == kst_day else 1
-
-    df_kisoft_dedup = df_kisoft.copy()
-    df_kisoft_dedup["_rank"] = df_kisoft_dedup.apply(_kisoft_rank, axis=1)
-    df_kisoft_dedup = (
-        df_kisoft_dedup
-        .sort_values("_rank")
-        .drop_duplicates(subset=["SAP Rahmentour"], keep="first")
-        .drop(columns=["_rank"])
+    # Kisoft-Merge: SAP Rahmentour + Bestelltag gegen CSB-Tourstartzahl matchen.
+    # Kisoft hat pro Rahmentour mehrere Einträge (eine pro Wochentag-Variante).
+    # Die SAP-Spalte "Bestelltag" (1=Mo, 2=Di, ..., 6=Sa) gibt den Liefertag –
+    # die passende Kisoft-Zeile hat genau diese Ziffer als Startzahl der CSB Tournummer.
+    df_kisoft_work = df_kisoft.copy()
+    df_kisoft_work["_csb_day"] = df_kisoft_work["CSB Tournummer"].apply(
+        lambda v: int(normalize_digits(normalize_text(v))[0])
+        if normalize_digits(normalize_text(v)) and normalize_digits(normalize_text(v))[0].isdigit()
+        else 0
     )
 
     df_sap = df_sap.merge(
-        df_kisoft_dedup[["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor"]],
+        df_kisoft_work[["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor", "_csb_day"]],
         left_on="Kisoft_Key",
         right_on="SAP Rahmentour",
         how="left",
     )
 
-    # Doppelte SAP-Zeilen nur einmal übernehmen: gleiche SAP, gleicher Bestelltag, gleiche Transportgruppe.
+    # Nur den Kisoft-Eintrag behalten, dessen CSB-Starttag mit SAP-Bestelltag übereinstimmt.
+    # Bei keinem Match (left join → kein Kisoft-Eintrag): Zeile trotzdem behalten.
+    bestelltag_num = pd.to_numeric(df_sap["Bestelltag"], errors="coerce").fillna(0).astype(int)
+    matched    = df_sap["_csb_day"].notna() & (df_sap["_csb_day"] == bestelltag_num)
+    unmatched  = df_sap["_csb_day"].isna() | (df_sap["_csb_day"] == 0)
+    df_sap = df_sap[matched | unmatched].copy()
+    df_sap = df_sap.drop(columns=["_csb_day"], errors="ignore")
+
+    # Restliche echte Duplikate entfernen (gleiche SAP + Bestelltag + Transportgruppe).
     df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID"], keep="first").copy()
 
     def infer_liefertag(row: pd.Series) -> str:
