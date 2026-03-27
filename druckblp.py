@@ -1016,7 +1016,8 @@ def export_css() -> str:
         ══════════════════════════════════════ */
         .paper {
             width: 210mm;
-            min-height: 297mm;
+            height: 297mm;
+            overflow: hidden;
             margin: 0 auto 20px auto;
             background: #fff;
             box-shadow: 0 4px 24px rgba(0,0,0,0.18);
@@ -1230,8 +1231,8 @@ def export_css() -> str:
 
             .paper {
                 width: 210mm !important;
-                min-height: 0 !important;
-                max-height: none !important;
+                height: 297mm !important;
+                overflow: hidden !important;
                 margin: 0 !important;
                 padding: 10mm 12mm !important;
                 box-shadow: none !important;
@@ -1577,8 +1578,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 f'<section class="customer-entry" '
                 f'data-sap="{html.escape(sap.lower())}" '
                 f'data-csb="{html.escape(csb_search)}" '
-                f'data-search="{html.escape(search_blob)}">'
                 f'data-kategorie="{html.escape(normalize_text(customer.get("Kategorie", "")))}" '
+                f'data-search="{html.escape(search_blob)}">'
                 f'{"".join(entry_parts)}'
                 f'</section>'
             )
