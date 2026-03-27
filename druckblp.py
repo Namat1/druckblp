@@ -892,6 +892,17 @@ def export_css() -> str:
         .search-btn.reset:hover { background: #e74c3c; }
         .search-btn.print-btn { background: #1a7a3a; }
         .search-btn.print-btn:hover { background: #22a34e; }
+        .subtitle-edit-group {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            border-left: 1px solid #3a5a8a;
+            padding-left: 10px;
+            margin-left: 4px;
+        }
+        .subtitle-edit-group input {
+            min-width: 0;
+        }
         .search-count {
             font-size: 12px;
             color: #bcd0ec;
@@ -1386,12 +1397,20 @@ def render_export_search_toolbar() -> str:
     <nav class="search-bar" id="search-bar" role="search">
         <span class="search-bar-logo">&#128230; Sendeplan</span>
         <input id="search-input" type="text"
-            placeholder="Name, SAP, CSB, Ort, Fachberater, Sortiment …"
+            placeholder="Name, SAP, CSB, Ort, Fachberater, Sortiment \u2026"
             autocomplete="off" spellcheck="false" />
         <button type="button" class="search-btn" id="btn-prev" title="Vorheriger (Shift+Enter)">&#8679;</button>
-        <button type="button" class="search-btn" id="btn-next" title="Nächster (Enter)">&#8681;</button>
-        <button type="button" class="search-btn reset" id="btn-reset" title="Zurücksetzen (Esc)">&#10005;</button>
+        <button type="button" class="search-btn" id="btn-next" title="N\u00e4chster (Enter)">&#8681;</button>
+        <button type="button" class="search-btn reset" id="btn-reset" title="Zur\u00fccksetzen (Esc)">&#10005;</button>
         <span class="search-count" id="search-count"></span>
+        <span class="subtitle-edit-group" title="Untertitel auf allen Seiten gleichzeitig \u00e4ndern">
+            <label for="global-subtitle-input" style="font-size:0.82rem;color:#555;white-space:nowrap;">Untertitel:</label>
+            <input id="global-subtitle-input" type="text"
+                placeholder="z.B. Standart, NMS \u2026"
+                autocomplete="off" spellcheck="false"
+                style="width:120px;" />
+            <button type="button" class="search-btn" id="btn-apply-subtitle" title="Alle Untertitel setzen">&#10003; Alle</button>
+        </span>
         <button type="button" class="search-btn print-btn" onclick="window.print()" title="Drucken">&#128438; Drucken</button>
         <span class="search-empty" id="search-empty">Keine Treffer.</span>
     </nav>
@@ -1561,6 +1580,19 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             });
 
             updateCount();
+
+            // Globaler Untertitel: alle .doc-subtitle auf einmal setzen
+            function applyGlobalSubtitle() {
+                var val = document.getElementById("global-subtitle-input").value;
+                if (!val.trim()) return;
+                document.querySelectorAll(".doc-subtitle").forEach(function (el) {
+                    el.textContent = val;
+                });
+            }
+            document.getElementById("btn-apply-subtitle").addEventListener("click", applyGlobalSubtitle);
+            document.getElementById("global-subtitle-input").addEventListener("keydown", function (e) {
+                if (e.key === "Enter") { e.preventDefault(); applyGlobalSubtitle(); }
+            });
         });
     })();
     </script>
