@@ -1029,6 +1029,7 @@ def export_css() -> str:
             padding: 12mm 13mm 14mm 13mm;
             box-sizing: border-box;
             transform-origin: top left;
+            zoom: 1;
         }
 
         /* ══════════════════════════════════════
@@ -1196,7 +1197,7 @@ def export_css() -> str:
         /* ══════════════════════════════════════
            HIGHLIGHT BEIM SUCHEN
         ══════════════════════════════════════ */
-        .customer-entry { display: block; }
+        .customer-entry { display: block; contain: layout style; }
         .paper.is-match {
             outline: 3px solid #f5a623;
             outline-offset: -2px;
@@ -1244,11 +1245,13 @@ def export_css() -> str:
                 box-shadow: none !important;
                 border-radius: 0 !important;
                 page-break-inside: avoid;
+                contain: layout style;
             }
             .paper-inner {
                 width: 210mm !important;
                 padding: 10mm 12mm !important;
                 box-sizing: border-box !important;
+                transform: none !important;
             }
 
             .is-match, .is-current { outline: none !important; }
@@ -1766,26 +1769,42 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             updateSearchCount();
             updateCounts();
 
-            // ── Inhalt auf A4 skalieren wenn zu groß ──
+            // ── Inhalt auf A4 skalieren (zoom, batched reads+writes) ──
             function fitToPage() {
-                document.querySelectorAll(".paper-inner").forEach(function (inner) {
-                    inner.style.transform = "";  // reset
-                    var paperH = inner.parentElement.clientHeight;  // 297mm in px
-                    var paperW = inner.parentElement.clientWidth;   // 210mm in px
-                    var contentH = inner.scrollHeight;
-                    var contentW = inner.scrollWidth;
-                    var scaleH = paperH / contentH;
-                    var scaleW = paperW / contentW;
-                    var scale  = Math.min(scaleH, scaleW, 1);  // nie hochskalieren
+                var inners = Array.from(document.querySelectorAll(".paper-inner"));
+                // Reset zuerst – alle auf einmal damit Layout stabil ist
+                inners.forEach(function (el) {
+                    el.style.zoom = "";
+                    el.style.transform = "";
+                    el.style.width = "210mm";
+                });
+                // Alle Reads in einem Durchgang (kein Reflow-Thrashing)
+                var measurements = inners.map(function (inner) {
+                    return {
+                        inner:   inner,
+                        paperH:  inner.parentElement.clientHeight,
+                        paperW:  inner.parentElement.clientWidth,
+                        contentH: inner.scrollHeight,
+                        contentW: inner.scrollWidth,
+                    };
+                });
+                // Alle Writes in einem Durchgang
+                measurements.forEach(function (m) {
+                    var scale = Math.min(
+                        m.paperH / m.contentH,
+                        m.paperW / m.contentW,
+                        1
+                    );
                     if (scale < 1) {
-                        inner.style.transform = "scale(" + scale + ")";
-                        inner.style.width = (100 / scale) + "%";
-                    } else {
-                        inner.style.width = "100%";
+                        m.inner.style.zoom = scale;
+                        m.inner.style.width = "210mm";
                     }
                 });
             }
-            fitToPage();
+            // requestAnimationFrame: erst nach erstem Paint messen
+            requestAnimationFrame(function () {
+                requestAnimationFrame(fitToPage);
+            });
             window.addEventListener("resize", fitToPage);
 
             // ── Aktuell sichtbaren Kunden tracken (IntersectionObserver) ──
