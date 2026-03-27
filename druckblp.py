@@ -966,6 +966,24 @@ def export_css() -> str:
             font-weight: 700;
             color: #cc0000;
             margin-bottom: 1.5mm;
+            cursor: text;
+            border-radius: 3px;
+            padding: 0 2px;
+            outline: none;
+            transition: background 0.15s;
+        }
+        .doc-subtitle:hover {
+            background: rgba(204, 0, 0, 0.07);
+        }
+        .doc-subtitle:focus {
+            background: rgba(204, 0, 0, 0.1);
+            box-shadow: 0 0 0 2px rgba(204,0,0,0.25);
+        }
+        @media print {
+            .doc-subtitle:hover, .doc-subtitle:focus {
+                background: none;
+                box-shadow: none;
+            }
         }
         .doc-allsortiments {
             font-size: 8.5pt;
@@ -1315,7 +1333,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
 
             <div class="doc-title-block">
                 <div class="doc-title">Sende- &amp; Belieferungsplan</div>
-                <div class="doc-subtitle">{html.escape(subtitle)}</div>
+                <div class="doc-subtitle" contenteditable="true" title="Klicken zum Bearbeiten">{html.escape(subtitle)}</div>
             </div>
 
             <div class="doc-logo">
