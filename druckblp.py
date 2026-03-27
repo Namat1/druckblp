@@ -617,8 +617,9 @@ def prepare_dataframes(
         how="left",
     )
 
-    # Doppelte SAP-Zeilen nur einmal übernehmen: gleiche SAP, gleicher Bestelltag, gleiche Transportgruppe.
-    df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID"], keep="first").copy()
+    # Doppelte SAP-Zeilen nur einmal übernehmen: gleiche SAP, gleicher Bestelltag, gleiche Transportgruppe UND gleiche Rahmentour.
+    # Rahmentour_Raw muss im Key sein – sonst werden verschiedene Touren desselben Kunden fälschlich als Duplikate gewertet.
+    df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID", "Rahmentour_Raw"], keep="first").copy()
 
     def infer_liefertag(row: pd.Series) -> str:
         # 1. Erste Ziffer der CSB-Tournummer = Liefertag (1=Mo, 2=Di, …)
