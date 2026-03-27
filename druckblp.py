@@ -27,7 +27,7 @@ WOCHENTAGE = {
     6: "Samstag",
 }
 
-KATEGORIEN = ["Alle", "Malchow", "NMS", "MK", "Direkt"]
+KATEGORIEN = ["Alle", "MK", "Malchow", "NMS", "SuL", "Direkt"]
 
 UPLOAD_CONFIG = {
     "kunden": {
@@ -101,19 +101,24 @@ def build_kisoft_key(rahmentour_raw: str) -> str:
     return f"00{raw[:8]}" if raw else ""
 
 
-def is_mk_pattern(csb_nr: str) -> bool:
-    csb = normalize_digits(csb_nr)
-    return len(csb) == 4 and (csb.endswith("881") or csb.endswith("884"))
+_SuL_TOUREN = {"1058","2058","3058","4058","5058","6030",
+                "14444","24444","34444","44444","54444"}
 
 
 def classify_customer(rahmentour_raw: str, csb_nr: str) -> str:
-    route = normalize_text(rahmentour_raw).upper()
-    if "M" in route:
-        return "Malchow"
-    if "N" in route:
-        return "NMS"
-    if is_mk_pattern(csb_nr):
+    """Klassifiziert einen Kunden anhand der CSB-Nr-Ziffern.
+
+    Priorität: SuL > MK (X88X) > Malchow (X777X) > NMS (X222X) > Direkt
+    """
+    csb = normalize_digits(csb_nr)
+    if csb in _SuL_TOUREN:
+        return "SuL"
+    if "88" in csb:
         return "MK"
+    if "777" in csb:
+        return "Malchow"
+    if "222" in csb:
+        return "NMS"
     return "Direkt"
 
 
@@ -1476,14 +1481,17 @@ def render_export_search_toolbar() -> str:
             <button type="button" class="filter-btn active" data-kat="alle">
                 Alle <span class="filter-count" id="cnt-alle"></span>
             </button>
-            <button type="button" class="filter-btn" data-kat="Direkt">
-                Direkt <span class="filter-count" id="cnt-direkt"></span>
+            <button type="button" class="filter-btn" data-kat="MK">
+                MK <span class="filter-count" id="cnt-mk"></span>
+            </button>
+            <button type="button" class="filter-btn" data-kat="Malchow">
+                Malchow <span class="filter-count" id="cnt-malchow"></span>
             </button>
             <button type="button" class="filter-btn" data-kat="NMS">
                 NMS <span class="filter-count" id="cnt-nms"></span>
             </button>
-            <button type="button" class="filter-btn" data-kat="Malchow">
-                Malchow <span class="filter-count" id="cnt-malchow"></span>
+            <button type="button" class="filter-btn" data-kat="SuL">
+                SuL <span class="filter-count" id="cnt-sul"></span>
             </button>
         </div>
 
@@ -1603,7 +1611,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         function updateCounts() {
             var q = norm(document.getElementById("search-input").value);
-            var counts = { alle: 0, Direkt: 0, NMS: 0, Malchow: 0 };
+            var counts = { alle: 0, MK: 0, Malchow: 0, NMS: 0, SuL: 0, Direkt: 0 };
             allEntries.forEach(function (e) {
                 var kat = e.getAttribute("data-kategorie") || "";
                 var blob = norm(e.getAttribute("data-search") || "");
@@ -1613,7 +1621,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     if (counts[kat] !== undefined) counts[kat]++;
                 }
             });
-            var map = { alle: "cnt-alle", Direkt: "cnt-direkt", NMS: "cnt-nms", Malchow: "cnt-malchow" };
+            var map = { alle: "cnt-alle", MK: "cnt-mk", Malchow: "cnt-malchow", NMS: "cnt-nms", SuL: "cnt-sul" };
             Object.keys(map).forEach(function (k) {
                 var el = document.getElementById(map[k]);
                 if (el) el.textContent = counts[k] !== undefined ? counts[k] : "";
