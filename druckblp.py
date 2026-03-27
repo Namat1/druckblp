@@ -1241,6 +1241,7 @@ def export_css() -> str:
             }
 
             .is-match, .is-current { outline: none !important; }
+            .print-hidden { display: none !important; }
         }
     </style>
     """
@@ -1409,10 +1410,11 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     # Tourengruppe -> Subtitle (Standart / NMS / Malchow / MK …)
     kategorie = normalize_text(customer.get("Kategorie", ""))
     subtitle_map = {
-        "Direkt": "Standart",
-        "NMS":    "NMS",
-        "Malchow":"Malchow",
-        "MK":     "MK",
+        "Direkt":  "Standart",
+        "NMS":     "NMS",
+        "Malchow": "Malchow",
+        "MK":      "MK",
+        "SuL":     "SuL",
     }
     subtitle = subtitle_map.get(kategorie, kategorie or "Standart")
 
@@ -1519,6 +1521,9 @@ def render_export_search_toolbar() -> str:
             <button type="button" class="filter-btn" data-kat="SuL">
                 SuL <span class="filter-count" id="cnt-sul"></span>
             </button>
+            <button type="button" class="filter-btn" data-kat="Direkt">
+                Direkt <span class="filter-count" id="cnt-direkt"></span>
+            </button>
         </div>
 
         <div class="sidebar-subtitle-group">
@@ -1531,7 +1536,7 @@ def render_export_search_toolbar() -> str:
             </div>
         </div>
 
-        <button type="button" class="sidebar-print-btn" onclick="window.print()">&#128438; Drucken</button>
+        <button type="button" class="sidebar-print-btn" onclick="printCurrent()">&#128438; Drucken</button>
     </aside>
     """
 
@@ -1638,7 +1643,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     if (counts[kat] !== undefined) counts[kat]++;
                 }
             });
-            var map = { alle: "cnt-alle", MK: "cnt-mk", Malchow: "cnt-malchow", NMS: "cnt-nms", SuL: "cnt-sul" };
+            var map = { alle: "cnt-alle", MK: "cnt-mk", Malchow: "cnt-malchow", NMS: "cnt-nms", SuL: "cnt-sul", Direkt: "cnt-direkt" };
             Object.keys(map).forEach(function (k) {
                 var el = document.getElementById(map[k]);
                 if (el) el.textContent = counts[k] !== undefined ? counts[k] : "";
@@ -1754,7 +1759,44 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
             updateSearchCount();
             updateCounts();
+
+            // ── Aktuell sichtbaren Kunden tracken (IntersectionObserver) ──
+            var currentVisible = null;
+            var observer = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) {
+                        currentVisible = entry.target;
+                    }
+                });
+            }, { threshold: 0.3 });
+            allEntries.forEach(function (e) { observer.observe(e); });
         });
+
+        function printCurrent() {
+            // Wenn Suche aktiv und genau 1 Treffer: diesen drucken
+            // Sonst: aktuell sichtbaren Kunden im Viewport drucken
+            var entries = Array.from(document.querySelectorAll(".customer-entry"));
+            var visible = entries.filter(function (e) { return e.style.display !== "none"; });
+
+            var target = null;
+            if (visible.length === 1) {
+                target = visible[0];
+            } else if (typeof currentVisible !== "undefined" && currentVisible) {
+                target = currentVisible;
+            }
+
+            if (!target) {
+                window.print();
+                return;
+            }
+
+            // Alle anderen verstecken, drucken, wiederherstellen
+            entries.forEach(function (e) {
+                if (e !== target) e.classList.add("print-hidden");
+            });
+            window.print();
+            entries.forEach(function (e) { e.classList.remove("print-hidden"); });
+        }
     })();
     </script>
     """
