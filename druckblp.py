@@ -859,13 +859,34 @@ def render_panel(title: str, body: str) -> None:
 def export_css() -> str:
     return """
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
+
+        :root {
+            --ink:        #0f1923;
+            --ink-soft:   #3d4f60;
+            --ink-muted:  #7a8fa0;
+            --bg-main:    #111b25;
+            --bg-card:    #18273a;
+            --bg-hover:   #1e3347;
+            --accent:     #f0a500;
+            --accent-dim: #7a5200;
+            --accent-soft:#fff3d0;
+            --red:        #d63030;
+            --green:      #1a9e52;
+            --border:     rgba(255,255,255,0.07);
+            --paper-bg:   #ffffff;
+        }
+
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
-            background: #d8dfe8;
-            font-family: Arial, Helvetica, sans-serif;
+            background: var(--bg-main);
+            background-image:
+                radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px);
+            background-size: 22px 22px;
+            font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
             font-size: 10pt;
-            color: #111;
+            color: var(--ink);
             display: flex;
             flex-direction: row;
             min-height: 100vh;
@@ -873,143 +894,192 @@ def export_css() -> str:
         }
 
         /* ══════════════════════════════════════
-           LINKE SIDEBAR (on-screen only)
+           SIDEBAR
         ══════════════════════════════════════ */
         .sidebar {
-            width: 230px;
-            min-width: 230px;
-            background: #1a3a5c;
+            width: 240px;
+            min-width: 240px;
+            background: var(--bg-card);
+            border-right: 1px solid var(--border);
             min-height: 100vh;
             position: sticky;
             top: 0;
             height: 100vh;
             display: flex;
             flex-direction: column;
-            gap: 0;
             z-index: 100;
-            box-shadow: 2px 0 12px rgba(0,0,0,0.2);
             overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--bg-hover) transparent;
         }
         .sidebar-logo {
-            font-size: 15px;
-            font-weight: 800;
-            color: #f5a623;
-            letter-spacing: 0.04em;
-            padding: 18px 16px 12px 16px;
-            border-bottom: 1px solid #2a5080;
+            padding: 20px 18px 16px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .sidebar-logo-icon {
+            width: 32px; height: 32px;
+            background: var(--accent);
+            border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 15px; flex-shrink: 0;
+        }
+        .sidebar-logo-text {
+            font-size: 13px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.02em;
+        }
+        .sidebar-logo-sub {
+            font-size: 10px;
+            color: var(--ink-muted);
+            font-weight: 400;
+            margin-top: 1px;
         }
         .sidebar-section {
-            padding: 14px 12px 10px 12px;
-            border-bottom: 1px solid #2a5080;
+            padding: 16px 14px 12px;
+            border-bottom: 1px solid var(--border);
         }
         .sidebar-label {
-            font-size: 10px;
-            font-weight: 700;
-            color: #7aafd4;
+            font-size: 9px;
+            font-weight: 600;
+            color: var(--ink-muted);
             text-transform: uppercase;
-            letter-spacing: 0.08em;
-            margin-bottom: 7px;
+            letter-spacing: 0.12em;
+            margin-bottom: 8px;
         }
         .sidebar input[type=text] {
             width: 100%;
-            border: none;
-            border-radius: 6px;
-            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 8px 11px;
             font-size: 12px;
+            font-family: inherit;
             outline: none;
-            background: #fff;
-            color: #111;
-            box-sizing: border-box;
+            background: rgba(255,255,255,0.06);
+            color: #fff;
+            transition: border-color 0.15s, background 0.15s;
         }
-        .sidebar input[type=text]:focus { box-shadow: 0 0 0 2px #f5a623; }
+        .sidebar input[type=text]::placeholder { color: var(--ink-muted); }
+        .sidebar input[type=text]:focus {
+            border-color: var(--accent);
+            background: rgba(240,165,0,0.06);
+        }
         .filter-btn {
-            display: block;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
             width: 100%;
-            border: none;
-            border-radius: 6px;
-            padding: 9px 12px;
-            font-size: 13px;
-            font-weight: 700;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            padding: 8px 11px;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: inherit;
             cursor: pointer;
-            background: #2a4e72;
-            color: #cde;
+            background: transparent;
+            color: var(--ink-muted);
             text-align: left;
-            margin-bottom: 5px;
-            transition: background 0.15s, color 0.15s;
+            margin-bottom: 3px;
+            transition: all 0.15s;
         }
-        .filter-btn:hover { background: #2a5298; color: #fff; }
-        .filter-btn.active { background: #f5a623; color: #1a3a5c; }
+        .filter-btn:hover {
+            background: var(--bg-hover);
+            color: #fff;
+            border-color: var(--border);
+        }
+        .filter-btn.active {
+            background: var(--accent);
+            color: var(--ink);
+            font-weight: 700;
+            border-color: transparent;
+        }
         .filter-btn .filter-count {
-            float: right;
-            font-size: 11px;
-            font-weight: 600;
-            opacity: 0.75;
+            font-size: 10px;
+            font-family: 'DM Mono', monospace;
+            font-weight: 500;
+            background: rgba(0,0,0,0.15);
+            padding: 1px 6px;
+            border-radius: 20px;
+        }
+        .filter-btn.active .filter-count {
+            background: rgba(0,0,0,0.2);
         }
         .search-btn {
-            border: none;
-            border-radius: 6px;
-            padding: 8px 10px;
+            border: 1px solid var(--border);
+            border-radius: 7px;
+            padding: 7px 11px;
             font-size: 12px;
-            font-weight: 700;
+            font-weight: 600;
+            font-family: inherit;
             cursor: pointer;
-            background: #2a5298;
+            background: var(--bg-hover);
             color: #fff;
-            transition: background 0.15s;
+            transition: all 0.15s;
         }
-        .search-btn:hover { background: #3a6bc4; }
-        .search-btn.reset { background: #c0392b; }
-        .search-btn.reset:hover { background: #e74c3c; }
+        .search-btn:hover { background: #2a4a6a; border-color: rgba(255,255,255,0.15); }
+        .search-btn.reset {
+            background: rgba(214,48,48,0.15);
+            border-color: rgba(214,48,48,0.3);
+            color: #ff7070;
+        }
+        .search-btn.reset:hover { background: rgba(214,48,48,0.25); }
         .search-nav-row {
             display: flex;
             gap: 5px;
-            margin-top: 7px;
+            margin-top: 8px;
             align-items: center;
         }
         .search-count {
             font-size: 11px;
-            color: #bcd0ec;
+            font-family: 'DM Mono', monospace;
+            color: var(--ink-muted);
             flex: 1;
         }
         .search-empty {
             display: none;
-            background: #fff3cd;
-            color: #856404;
+            background: rgba(240,165,0,0.12);
+            color: var(--accent);
             border-radius: 6px;
             padding: 6px 10px;
             font-size: 11px;
             font-weight: 600;
             margin-top: 6px;
+            border: 1px solid rgba(240,165,0,0.2);
         }
         .sidebar-print-btn {
             display: block;
-            width: calc(100% - 24px);
-            margin: 12px;
+            width: calc(100% - 28px);
+            margin: 14px;
             border: none;
-            border-radius: 8px;
-            padding: 10px;
+            border-radius: 10px;
+            padding: 11px;
             font-size: 13px;
             font-weight: 700;
+            font-family: inherit;
             cursor: pointer;
-            background: #1a7a3a;
-            color: #fff;
+            background: var(--accent);
+            color: var(--ink);
             text-align: center;
-            transition: background 0.15s;
+            transition: all 0.15s;
+            letter-spacing: 0.01em;
         }
-        .sidebar-print-btn:hover { background: #22a34e; }
+        .sidebar-print-btn:hover {
+            background: #ffc020;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(240,165,0,0.35);
+        }
         .sidebar-subtitle-group {
-            padding: 12px 12px 6px 12px;
+            padding: 14px 14px 8px;
         }
 
         /* ══════════════════════════════════════
-           SEITEN-WRAPPER + MAIN
+           MAIN + PAGE-STACK
         ══════════════════════════════════════ */
-        .main-content {
-            flex: 1;
-            min-width: 0;
-        }
-        .page-stack {
-            padding: 20px 0;
-        }
+        .main-content { flex: 1; min-width: 0; }
+        .page-stack { padding: 28px 0 40px; }
 
         /* ══════════════════════════════════════
            A4-PAPIER
@@ -1018,15 +1088,28 @@ def export_css() -> str:
             width: 210mm;
             height: 297mm;
             overflow: hidden;
-            margin: 0 auto 20px auto;
-            background: #fff;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+            margin: 0 auto 28px auto;
+            background: var(--paper-bg);
+            box-shadow:
+                0 2px 4px rgba(0,0,0,0.12),
+                0 8px 32px rgba(0,0,0,0.28),
+                0 0 0 1px rgba(255,255,255,0.04);
             padding: 0;
             position: relative;
+            border-radius: 3px;
+        }
+        /* Farbiger Akzentstreifen oben */
+        .paper::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3.5px;
+            background: linear-gradient(90deg, #003366 0%, #005bac 40%, #f0a500 100%);
+            z-index: 1;
         }
         .paper-inner {
             width: 210mm;
-            padding: 12mm 13mm 14mm 13mm;
+            padding: 13mm 13mm 12mm 13mm;
             box-sizing: border-box;
             transform-origin: top left;
             zoom: 1;
@@ -1040,72 +1123,71 @@ def export_css() -> str:
             grid-template-columns: 52mm 1fr 44mm;
             gap: 3mm;
             align-items: flex-start;
-            margin-bottom: 4mm;
+            margin-bottom: 3.5mm;
             padding-bottom: 3mm;
+            border-bottom: 0.4mm solid #e8edf2;
         }
         .doc-address {
-            font-size: 9pt;
-            line-height: 1.5;
+            font-size: 8.5pt;
+            line-height: 1.55;
+            color: #444;
         }
         .doc-address strong {
             font-size: 9.5pt;
             font-weight: 700;
             display: block;
             margin-bottom: 0.5mm;
+            color: #111;
         }
-        .doc-title-block {
-            text-align: center;
-            padding: 0 4mm;
-        }
+        .doc-title-block { text-align: center; padding: 0 4mm; }
         .doc-title {
-            font-size: 20pt;
+            font-size: 17pt;
             font-weight: 700;
-            letter-spacing: -0.01em;
+            letter-spacing: -0.02em;
             line-height: 1.1;
-            margin-bottom: 1mm;
+            margin-bottom: 1.5mm;
+            color: #0d2035;
         }
         .doc-subtitle {
-            font-size: 14pt;
+            font-size: 11pt;
             font-weight: 700;
-            color: #cc0000;
-            margin-bottom: 1.5mm;
+            color: var(--red);
+            margin-bottom: 1mm;
             cursor: text;
-            border-radius: 3px;
-            padding: 0 2px;
+            border-radius: 4px;
+            padding: 1px 5px;
             outline: none;
             transition: background 0.15s;
+            display: inline-block;
         }
-        .doc-subtitle:hover {
-            background: rgba(204, 0, 0, 0.07);
-        }
+        .doc-subtitle:hover { background: rgba(214,48,48,0.06); }
         .doc-subtitle:focus {
-            background: rgba(204, 0, 0, 0.1);
-            box-shadow: 0 0 0 2px rgba(204,0,0,0.25);
+            background: rgba(214,48,48,0.1);
+            box-shadow: 0 0 0 2px rgba(214,48,48,0.2);
         }
         @media print {
             .doc-subtitle:hover, .doc-subtitle:focus {
-                background: none;
-                box-shadow: none;
+                background: none; box-shadow: none;
             }
         }
-        .doc-allsortiments {
-            font-size: 8.5pt;
-            color: #444;
-        }
-        .doc-logo {
-            text-align: right;
-        }
+        .doc-allsortiments { font-size: 8pt; color: #666; }
+        .doc-logo { text-align: right; }
 
         /* ══════════════════════════════════════
            INFOLEISTE
         ══════════════════════════════════════ */
         .doc-infobar {
-            font-size: 9.5pt;
-            margin: 3.5mm 0 4mm 0;
-            padding-top: 2.5mm;
-            border-top: 1px solid #ccc;
+            font-size: 8.5pt;
+            margin: 3mm 0 3.5mm;
+            padding: 2mm 3mm;
+            background: #f4f7fa;
+            border-radius: 3px;
+            border-left: 2.5px solid #003366;
+            color: #444;
+            display: flex;
+            gap: 6mm;
         }
-        .doc-infobar strong { font-weight: 700; }
+        .doc-infobar strong { font-weight: 700; color: #111; margin-right: 1mm; }
 
         /* ══════════════════════════════════════
            TOUR-ÜBERSICHT
@@ -1113,18 +1195,29 @@ def export_css() -> str:
         .tour-overview {
             width: 100%;
             border-collapse: collapse;
-            font-size: 9pt;
-            margin-bottom: 4mm;
+            font-size: 8.5pt;
+            margin-bottom: 3.5mm;
+            border-radius: 3px;
+            overflow: hidden;
         }
         .tour-overview td {
-            border: 1px solid #aaa;
+            border: 0.3mm solid #dde3ea;
             padding: 1.2mm 2.5mm;
             white-space: nowrap;
         }
-        .tour-overview tr:first-child td { font-weight: 700; }
+        .tour-overview tr:first-child td {
+            font-weight: 700;
+            background: #003366;
+            color: #fff;
+            border-color: #003366;
+        }
+        .tour-overview tr:last-child td {
+            background: #f4f7fa;
+            font-family: 'DM Mono', 'Courier New', monospace;
+            font-size: 8pt;
+        }
         .tour-overview td:first-child {
             font-weight: 700;
-            background: #f0f0f0;
             width: 20mm;
         }
 
@@ -1134,38 +1227,39 @@ def export_css() -> str:
         .plan-table {
             width: 100%;
             border-collapse: collapse;
-            border: 1.5px solid #999;
-            font-size: 9pt;
+            font-size: 8.5pt;
+            border: 0.3mm solid #c8d4df;
         }
         .plan-table thead th {
-            border: 1px solid #999;
+            border: 0.3mm solid #c8d4df;
             padding: 2mm 2.5mm;
             text-align: left;
             font-weight: 700;
-            background: #fff;
-            font-size: 9.5pt;
+            background: #0d2035;
+            color: #fff;
+            font-size: 8.5pt;
+            letter-spacing: 0.02em;
         }
+        .plan-table tbody tr:nth-child(even) td { background: #f7f9fb; }
         .plan-table tbody td {
-            border: 1px solid #bbb;
+            border: 0.3mm solid #dde3ea;
             padding: 1.5mm 2.5mm;
             vertical-align: top;
         }
-        .plan-table tr.day-start td {
-            border-top: 1.5px solid #888;
-        }
+        .plan-table tr.day-start td { border-top: 0.5mm solid #7a9ab5; }
         .plan-table td.liefertag-cell {
             font-weight: 700;
             width: 22mm;
             white-space: nowrap;
             vertical-align: top;
+            color: #003366;
         }
-        .plan-table td.bestelltag-cell {
-            width: 24mm;
-            white-space: nowrap;
-        }
+        .plan-table td.bestelltag-cell { width: 24mm; white-space: nowrap; }
         .plan-table td.zeit-cell {
             width: 26mm;
             white-space: nowrap;
+            font-family: 'DM Mono', 'Courier New', monospace;
+            font-size: 8pt;
         }
 
         /* ══════════════════════════════════════
@@ -1174,87 +1268,61 @@ def export_css() -> str:
         .cover-page, .separator-page {
             width: 210mm;
             min-height: 297mm;
-            margin: 0 auto 20px auto;
+            margin: 0 auto 28px auto;
             background: #fff;
-            box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.28);
             padding: 20mm 16mm;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
             text-align: center;
+            border-radius: 3px;
         }
-        .cover-page h1, .separator-page h1 {
-            font-size: 26pt; color: #003366; margin-bottom: 8mm;
-        }
-        .cover-page h2, .separator-page h2 {
-            font-size: 15pt; color: #333; margin-bottom: 4mm;
-        }
-        .cover-page p, .separator-page p {
-            font-size: 10pt; color: #666; margin: 1mm 0;
-        }
+        .cover-page h1, .separator-page h1 { font-size: 26pt; color: #003366; margin-bottom: 8mm; }
+        .cover-page h2, .separator-page h2 { font-size: 15pt; color: #333; margin-bottom: 4mm; }
+        .cover-page p, .separator-page p   { font-size: 10pt; color: #666; margin: 1mm 0; }
 
         /* ══════════════════════════════════════
-           HIGHLIGHT BEIM SUCHEN
+           SUCHE / HIGHLIGHT
         ══════════════════════════════════════ */
         .customer-entry { display: block; contain: layout style; }
-        .paper.is-match {
-            outline: 3px solid #f5a623;
-            outline-offset: -2px;
-        }
-        .paper.is-current {
-            outline: 4px solid #e74c3c;
-            outline-offset: -2px;
-        }
+        .paper.is-match  { box-shadow: 0 0 0 3px var(--accent), 0 8px 32px rgba(0,0,0,0.28); }
+        .paper.is-current { box-shadow: 0 0 0 3px var(--red), 0 8px 32px rgba(0,0,0,0.28); }
 
         /* ══════════════════════════════════════
            DRUCK
         ══════════════════════════════════════ */
-        @page {
-            size: A4 portrait;
-            margin: 0;
-        }
+        @page { size: A4 portrait; margin: 0; }
 
         @media print {
             html, body {
                 background: white !important;
                 width: 210mm !important;
-                margin: 0 !important;
-                padding: 0 !important;
+                margin: 0 !important; padding: 0 !important;
                 display: block !important;
             }
             .sidebar { display: none !important; }
             .main-content { width: 210mm !important; }
             .page-stack { padding: 0 !important; }
 
-            .customer-entry {
-                page-break-after: always;
-                break-after: page;
-            }
-            .customer-entry:last-child {
-                page-break-after: auto;
-                break-after: auto;
-            }
+            .customer-entry { page-break-after: always; break-after: page; }
+            .customer-entry:last-child { page-break-after: auto; break-after: auto; }
 
             .paper {
-                width: 210mm !important;
-                height: 297mm !important;
+                width: 210mm !important; height: 297mm !important;
                 overflow: hidden !important;
-                margin: 0 !important;
-                padding: 0 !important;
-                box-shadow: none !important;
-                border-radius: 0 !important;
-                page-break-inside: avoid;
-                contain: layout style;
+                margin: 0 !important; padding: 0 !important;
+                box-shadow: none !important; border-radius: 0 !important;
+                page-break-inside: avoid; contain: layout style;
             }
+            .paper::before { border-radius: 0; }
             .paper-inner {
-                width: 210mm !important;
-                padding: 10mm 12mm !important;
-                box-sizing: border-box !important;
-                transform: none !important;
+                width: 210mm !important; padding: 10mm 12mm !important;
+                box-sizing: border-box !important; transform: none !important;
             }
-
-            .is-match, .is-current { outline: none !important; }
+            .doc-subtitle:hover, .doc-subtitle:focus { background: none; box-shadow: none; }
+            .is-match, .is-current { box-shadow: none !important; }
             .print-hidden { display: none !important; }
         }
     </style>
@@ -1455,9 +1523,9 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
 
         <!-- ===== INFOLEISTE ===== -->
         <div class="doc-infobar">
-            <strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}&nbsp;&nbsp;&nbsp;
-            <strong>Fachberater:</strong> {html.escape(fachberater)}&nbsp;&nbsp;&nbsp;
-            <strong>Stand:</strong> {html.escape(stand)}
+            <span><strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}</span>
+            <span><strong>Fachberater:</strong> {html.escape(fachberater)}</span>
+            <span><strong>Stand:</strong> {html.escape(stand)}</span>
         </div>
 
         <!-- ===== TOUR-ÜBERSICHT ===== -->
@@ -1497,7 +1565,13 @@ def render_separator_page(customer: pd.Series) -> str:
 def render_export_search_toolbar() -> str:
     return """
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-logo">&#128230; Sendeplan</div>
+        <div class="sidebar-logo">
+            <div class="sidebar-logo-icon">&#128230;</div>
+            <div>
+                <div class="sidebar-logo-text">Sendeplan</div>
+                <div class="sidebar-logo-sub">NORDfrische Center</div>
+            </div>
+        </div>
 
         <div class="sidebar-section">
             <div class="sidebar-label">Suche</div>
