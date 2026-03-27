@@ -1280,11 +1280,11 @@ def render_plan_table(rows: pd.DataFrame) -> str:
 
 
 def logo_img_tag(logo_b64: str, logo_mime: str = "image/png") -> str:
-    """Gibt ein <img>-Tag mit Base64-Logo zurueck, oder das CSS-Fallback-Logo."""
+    """Gibt ein <img>-Tag zurueck. Base64 wird einmalig per JS gesetzt – nicht pro Seite."""
     if logo_b64:
         return (
-            f'<img src="data:{logo_mime};base64,{logo_b64}" ' 
-            f'alt="NORDfrische Center" style="max-width:44mm; max-height:20mm; width:auto; height:auto; display:block; margin-left:auto;">' 
+            '<img class="doc-logo-img" alt="NORDfrische Center" '
+            'style="max-width:44mm; max-height:20mm; width:auto; height:auto; display:block; margin-left:auto;">'
         )
     # CSS-Fallback
     return """
@@ -1418,6 +1418,17 @@ def render_export_search_toolbar() -> str:
 
 
 def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png") -> str:
+    # Logo-Base64 einmalig im <head> einbetten, nicht pro Seite wiederholen
+    if logo_b64:
+        logo_head_script = (
+            f'<script>'  
+            f'window.__LOGO_SRC="data:{logo_mime};base64,{logo_b64}";'  
+            f'document.addEventListener("DOMContentLoaded",function(){{'  
+            f'document.querySelectorAll(".doc-logo-img").forEach(function(img){{img.src=window.__LOGO_SRC;}});'  
+            f'}});</script>'
+        )
+    else:
+        logo_head_script = ""
     docs: List[str] = []
 
     entry_count = 0
@@ -1606,6 +1617,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         <meta name="viewport" content="width=210mm, initial-scale=1.0" />
         <title>Sendeplan-Export</title>
         {export_css()}
+        {logo_head_script}
     </head>
     <body>
         {render_export_search_toolbar()}
