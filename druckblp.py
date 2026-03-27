@@ -617,10 +617,8 @@ def prepare_dataframes(
         how="left",
     )
 
-    # Doppelte SAP-Zeilen entfernen: gleiche SAP + Bestelltag + Sortiment + CSB-Tour = echtes Duplikat.
-    # CSB Tournummer (aus Kisoft) ist der richtige Diskriminator für "verschiedene Tour" –
-    # Rahmentour_Raw kann pro Tag variieren (Kisoft X999-Varianten), CSB Tournummer nicht.
-    df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID", "CSB Tournummer"], keep="first").copy()
+    # Doppelte SAP-Zeilen nur einmal übernehmen: gleiche SAP, gleicher Bestelltag, gleiche Transportgruppe.
+    df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID"], keep="first").copy()
 
     def infer_liefertag(row: pd.Series) -> str:
         # 1. Erste Ziffer der CSB-Tournummer = Liefertag (1=Mo, 2=Di, …)
