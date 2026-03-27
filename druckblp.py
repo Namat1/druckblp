@@ -840,47 +840,90 @@ def export_css() -> str:
             font-family: Arial, Helvetica, sans-serif;
             font-size: 10pt;
             color: #111;
+            display: flex;
+            flex-direction: row;
+            min-height: 100vh;
+            margin: 0;
         }
 
         /* ══════════════════════════════════════
-           SUCHE (on-screen only)
+           LINKE SIDEBAR (on-screen only)
         ══════════════════════════════════════ */
-        .search-bar {
+        .sidebar {
+            width: 230px;
+            min-width: 230px;
+            background: #1a3a5c;
+            min-height: 100vh;
             position: sticky;
             top: 0;
-            z-index: 100;
-            background: #1a3a5c;
-            padding: 10px 16px;
+            height: 100vh;
             display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            flex-direction: column;
+            gap: 0;
+            z-index: 100;
+            box-shadow: 2px 0 12px rgba(0,0,0,0.2);
+            overflow-y: auto;
         }
-        .search-bar-logo {
-            font-size: 14px;
+        .sidebar-logo {
+            font-size: 15px;
             font-weight: 800;
             color: #f5a623;
             letter-spacing: 0.04em;
-            white-space: nowrap;
+            padding: 18px 16px 12px 16px;
+            border-bottom: 1px solid #2a5080;
         }
-        .search-bar input {
-            flex: 1;
-            min-width: 200px;
+        .sidebar-section {
+            padding: 14px 12px 10px 12px;
+            border-bottom: 1px solid #2a5080;
+        }
+        .sidebar-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: #7aafd4;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-bottom: 7px;
+        }
+        .sidebar input[type=text] {
+            width: 100%;
             border: none;
             border-radius: 6px;
-            padding: 8px 12px;
-            font-size: 13px;
+            padding: 8px 10px;
+            font-size: 12px;
             outline: none;
             background: #fff;
             color: #111;
+            box-sizing: border-box;
         }
-        .search-bar input:focus { box-shadow: 0 0 0 2px #f5a623; }
+        .sidebar input[type=text]:focus { box-shadow: 0 0 0 2px #f5a623; }
+        .filter-btn {
+            display: block;
+            width: 100%;
+            border: none;
+            border-radius: 6px;
+            padding: 9px 12px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #2a4e72;
+            color: #cde;
+            text-align: left;
+            margin-bottom: 5px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .filter-btn:hover { background: #2a5298; color: #fff; }
+        .filter-btn.active { background: #f5a623; color: #1a3a5c; }
+        .filter-btn .filter-count {
+            float: right;
+            font-size: 11px;
+            font-weight: 600;
+            opacity: 0.75;
+        }
         .search-btn {
             border: none;
             border-radius: 6px;
-            padding: 8px 14px;
-            font-size: 13px;
+            padding: 8px 10px;
+            font-size: 12px;
             font-weight: 700;
             cursor: pointer;
             background: #2a5298;
@@ -890,39 +933,54 @@ def export_css() -> str:
         .search-btn:hover { background: #3a6bc4; }
         .search-btn.reset { background: #c0392b; }
         .search-btn.reset:hover { background: #e74c3c; }
-        .search-btn.print-btn { background: #1a7a3a; }
-        .search-btn.print-btn:hover { background: #22a34e; }
-        .subtitle-edit-group {
+        .search-nav-row {
             display: flex;
+            gap: 5px;
+            margin-top: 7px;
             align-items: center;
-            gap: 4px;
-            border-left: 1px solid #3a5a8a;
-            padding-left: 10px;
-            margin-left: 4px;
-        }
-        .subtitle-edit-group input {
-            min-width: 0;
         }
         .search-count {
-            font-size: 12px;
+            font-size: 11px;
             color: #bcd0ec;
-            white-space: nowrap;
-            min-width: 90px;
+            flex: 1;
         }
         .search-empty {
             display: none;
             background: #fff3cd;
             color: #856404;
             border-radius: 6px;
-            padding: 8px 14px;
-            font-size: 13px;
+            padding: 6px 10px;
+            font-size: 11px;
             font-weight: 600;
-            width: 100%;
+            margin-top: 6px;
+        }
+        .sidebar-print-btn {
+            display: block;
+            width: calc(100% - 24px);
+            margin: 12px;
+            border: none;
+            border-radius: 8px;
+            padding: 10px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            background: #1a7a3a;
+            color: #fff;
+            text-align: center;
+            transition: background 0.15s;
+        }
+        .sidebar-print-btn:hover { background: #22a34e; }
+        .sidebar-subtitle-group {
+            padding: 12px 12px 6px 12px;
         }
 
         /* ══════════════════════════════════════
-           SEITEN-WRAPPER
+           SEITEN-WRAPPER + MAIN
         ══════════════════════════════════════ */
+        .main-content {
+            flex: 1;
+            min-width: 0;
+        }
         .page-stack {
             padding: 20px 0;
         }
@@ -1129,8 +1187,10 @@ def export_css() -> str:
                 width: 210mm !important;
                 margin: 0 !important;
                 padding: 0 !important;
+                display: block !important;
             }
-            .search-bar { display: none !important; }
+            .sidebar { display: none !important; }
+            .main-content { width: 210mm !important; }
             .page-stack { padding: 0 !important; }
 
             .customer-entry {
@@ -1394,26 +1454,51 @@ def render_separator_page(customer: pd.Series) -> str:
 
 def render_export_search_toolbar() -> str:
     return """
-    <nav class="search-bar" id="search-bar" role="search">
-        <span class="search-bar-logo">&#128230; Sendeplan</span>
-        <input id="search-input" type="text"
-            placeholder="Name, SAP, CSB, Ort, Fachberater, Sortiment \u2026"
-            autocomplete="off" spellcheck="false" />
-        <button type="button" class="search-btn" id="btn-prev" title="Vorheriger (Shift+Enter)">&#8679;</button>
-        <button type="button" class="search-btn" id="btn-next" title="N\u00e4chster (Enter)">&#8681;</button>
-        <button type="button" class="search-btn reset" id="btn-reset" title="Zur\u00fccksetzen (Esc)">&#10005;</button>
-        <span class="search-count" id="search-count"></span>
-        <span class="subtitle-edit-group" title="Untertitel auf allen Seiten gleichzeitig \u00e4ndern">
-            <label for="global-subtitle-input" style="font-size:0.82rem;color:#555;white-space:nowrap;">Untertitel:</label>
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-logo">&#128230; Sendeplan</div>
+
+        <div class="sidebar-section">
+            <div class="sidebar-label">Suche</div>
+            <input id="search-input" type="text"
+                placeholder="SAP, CSB, Name, Ort \u2026"
+                autocomplete="off" spellcheck="false" />
+            <div class="search-nav-row">
+                <button type="button" class="search-btn" id="btn-prev" title="Vorheriger (Shift+Enter)">&#8679;</button>
+                <button type="button" class="search-btn" id="btn-next" title="N\u00e4chster (Enter)">&#8681;</button>
+                <button type="button" class="search-btn reset" id="btn-reset" title="Zur\u00fccksetzen (Esc)">&#10005;</button>
+                <span class="search-count" id="search-count"></span>
+            </div>
+            <div class="search-empty" id="search-empty">Keine Treffer.</div>
+        </div>
+
+        <div class="sidebar-section">
+            <div class="sidebar-label">Kategorie</div>
+            <button type="button" class="filter-btn active" data-kat="alle">
+                Alle <span class="filter-count" id="cnt-alle"></span>
+            </button>
+            <button type="button" class="filter-btn" data-kat="Direkt">
+                Direkt <span class="filter-count" id="cnt-direkt"></span>
+            </button>
+            <button type="button" class="filter-btn" data-kat="NMS">
+                NMS <span class="filter-count" id="cnt-nms"></span>
+            </button>
+            <button type="button" class="filter-btn" data-kat="Malchow">
+                Malchow <span class="filter-count" id="cnt-malchow"></span>
+            </button>
+        </div>
+
+        <div class="sidebar-subtitle-group">
+            <div class="sidebar-label">Untertitel global \u00e4ndern</div>
             <input id="global-subtitle-input" type="text"
                 placeholder="z.B. Standart, NMS \u2026"
-                autocomplete="off" spellcheck="false"
-                style="width:120px;" />
-            <button type="button" class="search-btn" id="btn-apply-subtitle" title="Alle Untertitel setzen">&#10003; Alle</button>
-        </span>
-        <button type="button" class="search-btn print-btn" onclick="window.print()" title="Drucken">&#128438; Drucken</button>
-        <span class="search-empty" id="search-empty">Keine Treffer.</span>
-    </nav>
+                autocomplete="off" spellcheck="false" />
+            <div class="search-nav-row" style="margin-top:6px;">
+                <button type="button" class="search-btn" id="btn-apply-subtitle">&#10003; Alle setzen</button>
+            </div>
+        </div>
+
+        <button type="button" class="sidebar-print-btn" onclick="window.print()">&#128438; Drucken</button>
+    </aside>
     """
 
 
@@ -1469,6 +1554,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 f'data-sap="{html.escape(sap.lower())}" '
                 f'data-csb="{html.escape(csb_search)}" '
                 f'data-search="{html.escape(search_blob)}">'
+                f'data-kategorie="{html.escape(normalize_text(customer.get("Kategorie", "")))}" '
                 f'{"".join(entry_parts)}'
                 f'</section>'
             )
@@ -1482,6 +1568,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         var allEntries = [];
         var matches    = [];
         var cursor     = -1;
+        var activeKat  = "alle";
 
         function norm(s) {
             return (s || "").toLowerCase()
@@ -1514,20 +1601,37 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             entry.scrollIntoView({ behavior: "smooth", block: "start" });
         }
 
-        function updateCount() {
+        function updateCounts() {
+            var q = norm(document.getElementById("search-input").value);
+            var counts = { alle: 0, Direkt: 0, NMS: 0, Malchow: 0 };
+            allEntries.forEach(function (e) {
+                var kat = e.getAttribute("data-kategorie") || "";
+                var blob = norm(e.getAttribute("data-search") || "");
+                var matchesSearch = !q || blob.indexOf(q) !== -1;
+                if (matchesSearch) {
+                    counts.alle++;
+                    if (counts[kat] !== undefined) counts[kat]++;
+                }
+            });
+            var map = { alle: "cnt-alle", Direkt: "cnt-direkt", NMS: "cnt-nms", Malchow: "cnt-malchow" };
+            Object.keys(map).forEach(function (k) {
+                var el = document.getElementById(map[k]);
+                if (el) el.textContent = counts[k] !== undefined ? counts[k] : "";
+            });
+        }
+
+        function updateSearchCount() {
             var lbl = document.getElementById("search-count");
             var emp = document.getElementById("search-empty");
             var q   = document.getElementById("search-input").value.trim();
             if (!q) {
-                var vis = allEntries.filter(function (e) {
-                    return e.style.display !== "none";
-                }).length;
+                var vis = allEntries.filter(function (e) { return e.style.display !== "none"; }).length;
                 lbl.textContent = vis + " Kunden";
                 emp.style.display = "none";
             } else {
                 if (matches.length === 0) {
                     lbl.textContent = "0 Treffer";
-                    emp.style.display = "inline-block";
+                    emp.style.display = "block";
                 } else {
                     lbl.textContent = (cursor + 1) + " / " + matches.length;
                     emp.style.display = "none";
@@ -1535,15 +1639,18 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             }
         }
 
-        function runSearch() {
+        function applyFilter() {
             var q = norm(document.getElementById("search-input").value);
             clearHighlights();
             matches = [];
             cursor  = -1;
 
             allEntries.forEach(function (entry) {
+                var kat  = entry.getAttribute("data-kategorie") || "";
                 var blob = norm(entry.getAttribute("data-search") || "");
-                var show = !q || blob.indexOf(q) !== -1;
+                var katOk  = activeKat === "alle" || kat === activeKat;
+                var srchOk = !q || blob.indexOf(q) !== -1;
+                var show   = katOk && srchOk;
                 entry.style.display = show ? "" : "none";
                 if (show && q) {
                     setClass(entry, "is-match", true);
@@ -1556,7 +1663,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 setClass(matches[0], "is-current", true);
                 scrollToCurrent();
             }
-            updateCount();
+            updateSearchCount();
+            updateCounts();
         }
 
         function step(dir) {
@@ -1565,22 +1673,27 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             cursor = (cursor + dir + matches.length) % matches.length;
             setClass(matches[cursor], "is-current", true);
             scrollToCurrent();
-            updateCount();
+            updateSearchCount();
         }
 
         function resetSearch() {
             clearHighlights();
             document.getElementById("search-input").value = "";
+            activeKat = "alle";
+            document.querySelectorAll(".filter-btn").forEach(function (b) {
+                b.classList.toggle("active", b.getAttribute("data-kat") === "alle");
+            });
             allEntries.forEach(function (e) { e.style.display = ""; });
             matches = [];
             cursor  = -1;
-            updateCount();
+            updateSearchCount();
+            updateCounts();
         }
 
         document.addEventListener("DOMContentLoaded", function () {
             allEntries = Array.from(document.querySelectorAll(".customer-entry"));
 
-            document.getElementById("search-input").addEventListener("input",   runSearch);
+            document.getElementById("search-input").addEventListener("input", applyFilter);
             document.getElementById("btn-next").addEventListener("click",  function () { step(1); });
             document.getElementById("btn-prev").addEventListener("click",  function () { step(-1); });
             document.getElementById("btn-reset").addEventListener("click", resetSearch);
@@ -1590,9 +1703,18 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (e.key === "Escape") { resetSearch(); }
             });
 
-            updateCount();
+            // Kategorie-Filter Buttons
+            document.querySelectorAll(".filter-btn").forEach(function (btn) {
+                btn.addEventListener("click", function () {
+                    activeKat = btn.getAttribute("data-kat");
+                    document.querySelectorAll(".filter-btn").forEach(function (b) {
+                        b.classList.toggle("active", b === btn);
+                    });
+                    applyFilter();
+                });
+            });
 
-            // Globaler Untertitel: alle .doc-subtitle auf einmal setzen
+            // Globaler Untertitel
             function applyGlobalSubtitle() {
                 var val = document.getElementById("global-subtitle-input").value;
                 if (!val.trim()) return;
@@ -1604,6 +1726,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             document.getElementById("global-subtitle-input").addEventListener("keydown", function (e) {
                 if (e.key === "Enter") { e.preventDefault(); applyGlobalSubtitle(); }
             });
+
+            updateSearchCount();
+            updateCounts();
         });
     })();
     </script>
@@ -1621,8 +1746,10 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     </head>
     <body>
         {render_export_search_toolbar()}
+        <div class="main-content">
         <div class="page-stack">
         {''.join(docs)}
+        </div>
         </div>
         {search_script}
     </body>
