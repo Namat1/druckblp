@@ -105,12 +105,12 @@ _SuL_TOUREN = {"1058","2058","3058","4058","5058","6030",
                 "14444","24444","34444","44444","54444"}
 
 
-def classify_customer(rahmentour_raw: str, csb_nr: str) -> str:
-    """Klassifiziert einen Kunden anhand der CSB-Nr-Ziffern.
+def classify_by_csb_tour(csb_tour: str) -> str:
+    """Klassifiziert anhand der CSB-Tournummer (aus Kisoft).
 
     Priorität: SuL > MK (X88X) > Malchow (X777X) > NMS (X222X) > Direkt
     """
-    csb = normalize_digits(csb_nr)
+    csb = normalize_digits(csb_tour)
     if csb in _SuL_TOUREN:
         return "SuL"
     if "88" in csb:
@@ -119,6 +119,11 @@ def classify_customer(rahmentour_raw: str, csb_nr: str) -> str:
         return "Malchow"
     if "222" in csb:
         return "NMS"
+    return "Direkt"
+
+
+def classify_customer(rahmentour_raw: str, csb_nr: str) -> str:
+    """Fallback-Klassifizierung (wird überschrieben sobald CSB Tournummer bekannt ist)."""
     return "Direkt"
 
 
@@ -635,10 +640,9 @@ def prepare_dataframes(
         on="SAP_Nr",
         how="left",
     )
-    kunden_basis["Kategorie"] = kunden_basis.apply(
-        lambda row: classify_customer(row.get("Rahmentour_Raw", ""), row.get("CSB_Nr", "")),
-        axis=1,
-    )
+    # Kategorie wird erst nach dem Kisoft-Merge gesetzt (CSB Tournummer nötig).
+    # Platzhalter damit der Merge unten funktioniert:
+    kunden_basis["Kategorie"] = "Direkt"
 
     # Basis-Merge: Kundenstamm bekommt Grundinfos aus plan_rows
     plan_rows = df_sap.merge(
@@ -674,6 +678,23 @@ def prepare_dataframes(
 
     # Kostenstellen-Lookup auf plan_rows (CSB-Tournummer ist jetzt verfuegbar)
     plan_rows = apply_kostenstellen_lookup(plan_rows, df_kostenstellen)
+
+    # Kategorie aus erster CSB Tournummer pro Kunde bestimmen
+    csb_tour_agg = (
+        plan_rows[plan_rows["CSB Tournummer"] != ""]
+        .drop_duplicates(subset=["SAP_Nr"])
+        [["SAP_Nr", "CSB Tournummer"]]
+    )
+    csb_tour_agg["Kategorie"] = csb_tour_agg["CSB Tournummer"].map(classify_by_csb_tour)
+    kunden_basis = kunden_basis.merge(csb_tour_agg[["SAP_Nr", "Kategorie"]], on="SAP_Nr", how="left", suffixes=("_alt", ""))
+    kunden_basis["Kategorie"] = kunden_basis["Kategorie"].fillna("Direkt")
+    if "Kategorie_alt" in kunden_basis.columns:
+        kunden_basis = kunden_basis.drop(columns=["Kategorie_alt"])
+
+    # Kategorie auch in plan_rows aktualisieren
+    plan_rows = plan_rows.drop(columns=["Kategorie"], errors="ignore")
+    plan_rows = plan_rows.merge(kunden_basis[["SAP_Nr", "Kategorie"]], on="SAP_Nr", how="left")
+    plan_rows["Kategorie"] = plan_rows["Kategorie"].fillna("Direkt")
 
     # Tourengruppe / Kostenstelle / Leiter zurueck auf kunden_basis aggregieren
     # (erster nicht-leerer Wert pro SAP_Nr, damit die Kundenkarte diese Felder zeigt)
