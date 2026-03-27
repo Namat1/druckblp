@@ -1536,16 +1536,8 @@ def render_export_search_toolbar() -> str:
 
 
 def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png") -> str:
-    # Logo-Base64 einmalig im <head> als CSS einbetten – kein JS, kein file://-Problem
-    if logo_b64:
-        logo_head_script = (
-            f'<style>'
-            f'.doc-logo-img {{ content: url("data:{logo_mime};base64,{logo_b64}"); '
-            f'max-width:44mm; max-height:20mm; display:block; margin-left:auto; }}'
-            f'</style>'
-        )
-    else:
-        logo_head_script = ""
+    # Kein dynamischer Logo-Load – src direkt im img-Tag, Browser cached automatisch
+    logo_head_script = ""
     docs: List[str] = []
 
     entry_count = 0
@@ -1774,7 +1766,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Sendeplan-Export</title>
         {export_css()}
-        {logo_head_script}
     </head>
     <body>
         {render_export_search_toolbar()}
