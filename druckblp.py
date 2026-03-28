@@ -2594,8 +2594,12 @@ def main() -> None:
         render_panel("Hinweis", upload_status_lines(upload_map))
         return
 
-    # Debug-Report einmal berechnen, in Export-Tab und Debug-Tab verwenden
-    debug_reports = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
+    # Debug-Report gecached in session_state (gleicher Cache-Key wie Daten)
+    _data_key = st.session_state.get("_df_cache_key", "")
+    if st.session_state.get("_debug_cache_key") != _data_key:
+        st.session_state["_debug_reports"] = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
+        st.session_state["_debug_cache_key"] = _data_key
+    debug_reports = st.session_state["_debug_reports"]
 
     with st.sidebar:
         st.divider()
@@ -2707,27 +2711,45 @@ def main() -> None:
                 logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
                              "png": "image/png", "svg": "image/svg+xml",
                              "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
-            bulk_html = build_full_document_html(filtered_customers, plan_rows_df,
-                            logo_b64=logo_b64, logo_mime=logo_mime,
-                            debug_data=debug_reports)
+
+            # ── Lazy HTML-Generierung: nur auf Knopfdruck, gecached in session_state ──
+            _export_hash = hashlib.md5(
+                (st.session_state.category_filter + st.session_state.search_text +
+                 st.session_state.get("_df_cache_key", "")).encode()
+            ).hexdigest()
+
+            if st.button("📄 Gesamtplan generieren", use_container_width=True,
+                         help="Erzeugt die HTML-Datei für alle gefilterten Kunden"):
+                with st.spinner(f"Generiere HTML für {len(filtered_customers)} Kunden …"):
+                    bulk_html = build_full_document_html(filtered_customers, plan_rows_df,
+                                    logo_b64=logo_b64, logo_mime=logo_mime,
+                                    debug_data=debug_reports)
+                st.session_state["_export_html"] = bulk_html
+                st.session_state["_export_hash"] = _export_hash
+
             filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
 
             col1, col2 = st.columns(2)
             with col1:
-                st.download_button(
-                    label="Gefilterten Gesamtplan als Standalone-HTML herunterladen",
-                    data=bulk_html,
-                    file_name=f"sendeplan_{filename_suffix}.html",
-                    mime="text/html",
-                    use_container_width=True,
-                )
+                if (st.session_state.get("_export_hash") == _export_hash
+                        and st.session_state.get("_export_html")):
+                    st.download_button(
+                        label="⬇ Gefilterten Gesamtplan herunterladen",
+                        data=st.session_state["_export_html"],
+                        file_name=f"sendeplan_{filename_suffix}.html",
+                        mime="text/html",
+                        use_container_width=True,
+                    )
+                else:
+                    st.caption("Zuerst oben den Gesamtplan generieren.")
+
             with col2:
                 if st.session_state.selected_sap:
                     selected_customer = filtered_customers[filtered_customers["SAP_Nr"] == st.session_state.selected_sap].iloc[0]
                     customer_rows = plan_rows_df[plan_rows_df["SAP_Nr"] == st.session_state.selected_sap].copy()
                     single_html = build_single_document_html(selected_customer, customer_rows, logo_b64=logo_b64, logo_mime=logo_mime)
                     st.download_button(
-                        label="Aktuellen Kunden als HTML herunterladen",
+                        label="⬇ Aktuellen Kunden herunterladen",
                         data=single_html,
                         file_name=f"sendeplan_{normalize_text(selected_customer['SAP_Nr'])}.html",
                         mime="text/html",
