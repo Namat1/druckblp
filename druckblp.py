@@ -596,7 +596,7 @@ def prepare_dataframes(
     kostenstellen_bytes: bytes,
     kostenstellen_name: str,
     csv_separator: str,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int]]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int], pd.DataFrame, pd.DataFrame]:
     df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
     df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
     df_transport = load_structured_upload(transport_bytes, transport_name, csv_separator, "transport")
@@ -626,13 +626,18 @@ def prepare_dataframes(
     ).copy()
 
     def infer_liefertag(row: pd.Series) -> str:
-        # Liefertag direkt aus SAP Spalte G (1=Mo, 2=Di, … 6=Sa)
+        # 1. Spalte G aus SAP = direkter Liefertag (1=Mo … 6=Sa)
         liefertag_raw = normalize_digits(row.get("Liefertag_Raw", ""))
         if liefertag_raw and liefertag_raw[0].isdigit():
             day = int(liefertag_raw[0])
             if day in WOCHENTAGE:
                 return WOCHENTAGE[day]
-        return "Unbekannt"
+        # 2. Fallback: Wochentag aus Kisoft
+        wochentag = normalize_text(row.get("Wochentag", ""))
+        if wochentag and wochentag.lower() not in ("", "nan"):
+            return wochentag.capitalize()
+        # 3. Letzter Fallback: Bestelltag aus SAP (Spalte H)
+        return row.get("Bestelltag_Name", "Unbekannt")
 
     kunden_basis = df_kunden.merge(
         df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates(subset=["SAP_Nr"]),
@@ -713,7 +718,79 @@ def prepare_dataframes(
     counts = {cat: int((kunden_basis["Kategorie"] == cat).sum()) for cat in KATEGORIEN if cat != "Alle"}
     counts["Alle"] = int(len(kunden_basis))
 
-    return kunden_basis, plan_rows, counts
+    return kunden_basis, plan_rows, counts, df_kisoft, df_sap
+
+
+
+# ============================================================
+# DEBUG / QUALITÄTSPRÜFUNG
+# ============================================================
+def build_debug_report(
+    plan_rows: pd.DataFrame,
+    df_kisoft: pd.DataFrame,
+    df_sap_raw: pd.DataFrame,
+) -> Dict[str, pd.DataFrame]:
+    """Erstellt Qualitäts-Reports für SAP ↔ Kisoft Abgleich."""
+    reports: Dict[str, pd.DataFrame] = {}
+
+    # 1. SAP-Zeilen ohne Kisoft-Match (kein CSB Tournummer)
+    no_kisoft = plan_rows[
+        plan_rows["CSB Tournummer"].map(normalize_text) == ""
+    ][["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Liefertag_Raw", "Liefertag", "Sortiment"]].drop_duplicates()
+    reports["Kein Kisoft-Match"] = no_kisoft.reset_index(drop=True)
+
+    # 2. Liefertag aus Fallback (Spalte G leer oder ungültig)
+    fallback_rows = plan_rows[
+        plan_rows["Liefertag_Raw"].map(lambda v: not normalize_digits(normalize_text(v)) or
+            not normalize_digits(normalize_text(v))[0].isdigit())
+    ][["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "Liefertag", "CSB Tournummer", "Sortiment"]].drop_duplicates()
+    reports["Liefertag aus Fallback (Spalte G leer)"] = fallback_rows.reset_index(drop=True)
+
+    # 3. Liefertag-Konflikt: Spalte G weicht von CSB-Startzahl ab
+    def _liefertag_konflikt(row):
+        g = normalize_digits(normalize_text(row.get("Liefertag_Raw", "")))
+        csb = normalize_digits(normalize_text(row.get("CSB Tournummer", "")))
+        if not g or not g[0].isdigit() or not csb or not csb[0].isdigit():
+            return False
+        return g[0] != csb[0]
+    konflikt = plan_rows[plan_rows.apply(_liefertag_konflikt, axis=1)][
+        ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "CSB Tournummer", "Liefertag", "Sortiment"]
+    ].drop_duplicates()
+    reports["Liefertag-Konflikt SAP↔CSB"] = konflikt.reset_index(drop=True)
+
+    # 4. Kunden ohne Kategorie-Match (Direkt obwohl keine Tour erkannt)
+    unklar = plan_rows[
+        (plan_rows["Kategorie"] == "Direkt") &
+        (plan_rows["CSB Tournummer"].map(normalize_text) == "")
+    ][["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Sortiment"]].drop_duplicates()
+    reports["Direkt ohne CSB-Tour"] = unklar.reset_index(drop=True)
+
+    # 5. Doppelte SAP-Zeilen nach Merge (gleiche SAP+Liefertag+Sortiment, verschiedene Touren)
+    dupes = plan_rows[
+        plan_rows.duplicated(subset=["SAP_Nr", "Liefertag", "Liefertyp_ID"], keep=False)
+    ][["SAP_Nr", "Name", "Liefertag", "Liefertyp_ID", "Sortiment", "CSB Tournummer", "Rahmentour_Raw"]].sort_values(
+        ["SAP_Nr", "Liefertag"]
+    )
+    reports["Mögliche Duplikate"] = dupes.reset_index(drop=True)
+
+    return reports
+
+
+def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
+    """Zeigt Debug-Reports im Streamlit-Tab."""
+    total_issues = sum(len(df) for df in reports.values())
+    if total_issues == 0:
+        st.success("✅ Keine Auffälligkeiten gefunden – SAP und Kisoft sind konsistent.")
+        return
+
+    for title, df in reports.items():
+        count = len(df)
+        icon = "✅" if count == 0 else "⚠️"
+        with st.expander(f"{icon} {title} ({count} Einträge)", expanded=count > 0):
+            if df.empty:
+                st.success("Keine Einträge.")
+            else:
+                st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 # ============================================================
@@ -2153,7 +2230,7 @@ def main() -> None:
         return
 
     try:
-        customers_df, plan_rows_df, counts = prepare_dataframes(
+        customers_df, plan_rows_df, counts, df_kisoft_debug, df_sap_debug = prepare_dataframes(
             kunden_file.getvalue(),
             kunden_file.name,
             sap_file.getvalue(),
@@ -2208,7 +2285,7 @@ def main() -> None:
 
     filtered_customers = filter_customers(customers_df, st.session_state.category_filter, st.session_state.search_text)
 
-    overview_tab, preview_tab, export_tab = st.tabs(["Übersicht", "Kundenvorschau", "Export"])
+    overview_tab, preview_tab, export_tab, debug_tab = st.tabs(["Übersicht", "Kundenvorschau", "Export", "🔍 Debug"])
 
     with overview_tab:
         st.markdown(
@@ -2309,6 +2386,12 @@ def main() -> None:
                     )
 
             st.info("Nach dem Download die HTML-Datei im Browser öffnen. Dort kannst du direkt nach SAP- oder CSB-Nummer suchen und anschließend drucken.")
+
+    with debug_tab:
+        st.subheader("SAP ↔ Kisoft Qualitätsprüfung")
+        st.write("Überprüft ob alle Rahmentouren in Kisoft gepflegt sind und ob Liefertage konsistent sind.")
+        debug_reports = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
+        render_debug_tab(debug_reports)
 
 
 if __name__ == "__main__":
