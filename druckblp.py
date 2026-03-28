@@ -820,23 +820,37 @@ def build_debug_report(
             .rename(columns={"CSB Tournummer": "Anzahl Touren"})
         )
         _multi = _tour_counts[_tour_counts["Anzahl Touren"] > 1]
-        # Touren-Liste pro Kunde+Tag aufbauen (CSB, SAP-Rahmentour, Kisoft-Rahmentour)
+        # Touren gruppiert: pro Tour eine Zeile mit CSB | SAP | Kisoft zusammen
         if not _multi.empty:
-            def _join_unique(s): return ", ".join(sorted(s.dropna().astype(str).unique()))
-            _agg = _sap_only.groupby(["SAP_Nr", "Liefertag"]).agg(
-                **{
-                    "CSB Touren":          ("CSB Tournummer",  _join_unique),
-                    "SAP Rahmentour":      ("Rahmentour_Raw",  _join_unique),
-                    "Kisoft Rahmentour":   ("SAP Rahmentour",  _join_unique) if "SAP Rahmentour" in _sap_only.columns else ("Rahmentour_Raw", _join_unique),
-                }
-            ).reset_index()
+            has_kisoft = "SAP Rahmentour" in _sap_only.columns
+
+            def _grouped_tours(grp):
+                """Pro Gruppe (SAP_Nr, Liefertag) jede einzigartige Tour als gruppierten String."""
+                seen = []
+                for _, r in grp.iterrows():
+                    csb = normalize_text(r.get("CSB Tournummer", ""))
+                    sap = normalize_text(r.get("Rahmentour_Raw", ""))
+                    kis = normalize_text(r.get("SAP Rahmentour", "")) if has_kisoft else ""
+                    parts = [p for p in [csb, sap, kis] if p]
+                    entry = " | ".join(parts)
+                    if entry and entry not in seen:
+                        seen.append(entry)
+                return ", ".join(seen)
+
+            _agg = (
+                _sap_only
+                .groupby(["SAP_Nr", "Liefertag"])
+                .apply(_grouped_tours)
+                .reset_index()
+                .rename(columns={0: "Touren (CSB | SAP | Kisoft)"})
+            )
             _multi = _multi.merge(_agg, on=["SAP_Nr", "Liefertag"], how="left")
             addr_cols = [c for c in ["SAP_Nr", "Name", "Strasse", "PLZ", "Ort"] if c in plan_rows.columns]
             if addr_cols:
                 _addr = plan_rows[addr_cols].drop_duplicates("SAP_Nr")
                 _multi = _multi.merge(_addr, on="SAP_Nr", how="left")
             _multi = _multi.sort_values(["SAP_Nr", "Liefertag"]).reset_index(drop=True)
-            cols_order = [c for c in ["SAP_Nr", "Name", "Strasse", "PLZ", "Ort", "Liefertag", "Anzahl Touren", "CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"] if c in _multi.columns]
+            cols_order = [c for c in ["SAP_Nr", "Name", "Strasse", "PLZ", "Ort", "Liefertag", "Anzahl Touren", "Touren (CSB | SAP | Kisoft)"] if c in _multi.columns]
             reports["Mehrere Touren an einem Tag"] = _multi[cols_order]
         else:
             reports["Mehrere Touren an einem Tag"] = pd.DataFrame()
@@ -1848,30 +1862,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     rows_html += "<tr>" + "".join(
                         f"<td>{html.escape(str(row[c]))}</td>" for c in cols
                     ) + "</tr>"
-            # CSV als data-URI – Tour-Spalten zu einem Feld zusammenführen
+            # CSV als data-URI
             if not df.empty:
                 import base64 as _b64
-                _tour_cols = ["CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"]
-                _present_tour_cols = [c for c in _tour_cols if c in df.columns]
-                _other_cols = [c for c in df.columns if c not in _present_tour_cols]
-                if _present_tour_cols:
-                    # Tour-Spalten zusammenführen
-                    _df_exp = df[_other_cols].copy()
-                    _df_exp["Touren (CSB, SAP, Kisoft)"] = df[_present_tour_cols].apply(
-                        lambda row: ", ".join(
-                            f"{c}: {str(row[c])}" for c in _present_tour_cols
-                            if str(row[c]) not in ("", "nan")
-                        ), axis=1
-                    )
-                    _cols = list(_df_exp.columns)
-                    _csv_lines = [";".join(_cols)]
-                    for _, _row in _df_exp.iterrows():
-                        _csv_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
-                else:
-                    _cols = list(df.columns)
-                    _csv_lines = [";".join(_cols)]
-                    for _, _row in df.iterrows():
-                        _csv_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
+                _cols = list(df.columns)
+                _csv_lines = [";".join(_cols)]
+                for _, _row in df.iterrows():
+                    _csv_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
                 _csv_bytes = "\n".join(_csv_lines).encode("utf-8-sig")
                 _csv_b64 = _b64.b64encode(_csv_bytes).decode()
                 _safe_title = title.replace("/", "-").replace(" ", "_")
@@ -1903,29 +1900,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         # Gesamt-Export aller nicht-leeren Reports
         import base64 as _b64
         _all_lines = []
-        _tour_cols_g = ["CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"]
         for _t, _df in data.items():
             if not _df.empty:
                 _all_lines.append(f"=== {_t} ===")
-                _pt = [c for c in _tour_cols_g if c in _df.columns]
-                _oc = [c for c in _df.columns if c not in _pt]
-                if _pt:
-                    _df_g = _df[_oc].copy()
-                    _df_g["Touren (CSB, SAP, Kisoft)"] = _df[_pt].apply(
-                        lambda row: ", ".join(
-                            f"{c}: {str(row[c])}" for c in _pt
-                            if str(row[c]) not in ("", "nan")
-                        ), axis=1
-                    )
-                    _cols = list(_df_g.columns)
-                    _all_lines.append(";".join(_cols))
-                    for _, _row in _df_g.iterrows():
-                        _all_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
-                else:
-                    _cols = list(_df.columns)
-                    _all_lines.append(";".join(_cols))
-                    for _, _row in _df.iterrows():
-                        _all_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
+                _cols = list(_df.columns)
+                _all_lines.append(";".join(_cols))
+                for _, _row in _df.iterrows():
+                    _all_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
                 _all_lines.append("")
         if _all_lines:
             _all_bytes = "\n".join(_all_lines).encode("utf-8-sig")
