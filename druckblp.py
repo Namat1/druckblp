@@ -820,21 +820,22 @@ def build_debug_report(
             .rename(columns={"CSB Tournummer": "Anzahl Touren"})
         )
         _multi = _tour_counts[_tour_counts["Anzahl Touren"] > 1]
-        # Touren-Liste pro Kunde+Tag aufbauen
+        # Touren-Liste pro Kunde+Tag aufbauen (CSB, SAP-Rahmentour, Kisoft-Rahmentour)
         if not _multi.empty:
-            _tour_list = (
-                _sap_only.groupby(["SAP_Nr", "Liefertag"])["CSB Tournummer"]
-                .apply(lambda x: ", ".join(sorted(x.unique())))
-                .reset_index()
-                .rename(columns={"CSB Tournummer": "CSB Touren"})
-            )
-            _multi = _multi.merge(_tour_list, on=["SAP_Nr", "Liefertag"], how="left")
-            # Kundennamen ergänzen
+            def _join_unique(s): return ", ".join(sorted(s.dropna().astype(str).unique()))
+            _agg = _sap_only.groupby(["SAP_Nr", "Liefertag"]).agg(
+                **{
+                    "CSB Touren":          ("CSB Tournummer",  _join_unique),
+                    "SAP Rahmentour":      ("Rahmentour_Raw",  _join_unique),
+                    "Kisoft Rahmentour":   ("SAP Rahmentour",  _join_unique) if "SAP Rahmentour" in _sap_only.columns else ("Rahmentour_Raw", _join_unique),
+                }
+            ).reset_index()
+            _multi = _multi.merge(_agg, on=["SAP_Nr", "Liefertag"], how="left")
             if "Name" in plan_rows.columns:
                 _namen = plan_rows[["SAP_Nr", "Name"]].drop_duplicates("SAP_Nr")
                 _multi = _multi.merge(_namen, on="SAP_Nr", how="left")
             _multi = _multi.sort_values(["SAP_Nr", "Liefertag"]).reset_index(drop=True)
-            cols_order = [c for c in ["SAP_Nr", "Name", "Liefertag", "Anzahl Touren", "CSB Touren"] if c in _multi.columns]
+            cols_order = [c for c in ["SAP_Nr", "Name", "Liefertag", "Anzahl Touren", "CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"] if c in _multi.columns]
             reports["Mehrere Touren an einem Tag"] = _multi[cols_order]
         else:
             reports["Mehrere Touren an einem Tag"] = pd.DataFrame()
