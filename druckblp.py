@@ -1288,7 +1288,7 @@ def export_css() -> str:
             grid-template-columns: 52mm 1fr 44mm;
             gap: 3mm;
             align-items: flex-start;
-            margin-bottom: 4mm;
+            margin-bottom: 2mm;
             padding-bottom: 0;
             border-bottom: none;
         }
@@ -1341,7 +1341,7 @@ def export_css() -> str:
         ══════════════════════════════════════ */
         .doc-infobar {
             font-size: 9pt;
-            margin: 3mm 0 3.5mm;
+            margin: 2mm 0 2mm;
             padding: 0;
             background: none;
             border: none;
@@ -1350,35 +1350,6 @@ def export_css() -> str:
             gap: 6mm;
         }
         .doc-infobar strong { font-weight: 700; color: #111; margin-right: 1mm; }
-
-        /* ══════════════════════════════════════
-           TOUR-ÜBERSICHT
-        ══════════════════════════════════════ */
-        .tour-overview {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 9pt;
-            margin-bottom: 3.5mm;
-        }
-        .tour-overview td {
-            border: 0.3mm solid #999;
-            padding: 1.5mm 3mm;
-            white-space: nowrap;
-        }
-        .tour-overview tr:first-child td {
-            font-weight: 700;
-            background: none;
-            color: #111;
-            border-color: #999;
-        }
-        .tour-overview tr:last-child td {
-            background: none;
-            font-size: 9pt;
-        }
-        .tour-overview td:first-child {
-            font-weight: 700;
-            width: 20mm;
-        }
 
         /* ══════════════════════════════════════
            HAUPT-PLANTABELLE
@@ -1517,23 +1488,21 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
 
     days_present = [d for d in day_order if d in tour_by_day]
 
-    day_cells  = "".join(f"<td>{html.escape(d)}</td>" for d in days_present)
-    tour_cells = "".join(
-        f"<td>{'<br>'.join(html.escape(t) for t in tour_by_day[d])}</td>"
+    # Tabulierte Spalten: Liefertag + Tour als zwei Textzeilen
+    col_w = "110px"  # einheitliche Spaltenbreite
+    day_spans = "".join(
+        f'<span style="display:inline-block;width:{col_w}">{html.escape(d)}</span>' for d in days_present
+    )
+    tour_spans = "".join(
+        f'<span style="display:inline-block;width:{col_w}">{"  ".join(html.escape(t) for t in tour_by_day[d])}</span>'
         for d in days_present
     )
 
     return f"""
-    <table class="tour-overview">
-        <tr>
-            <td>Liefertag:</td>
-            {day_cells}
-        </tr>
-        <tr>
-            <td>Tour:</td>
-            {tour_cells}
-        </tr>
-    </table>
+    <div style="font-size:9pt; margin-bottom:2.5mm; line-height:1.6;">
+        <div><strong>Liefertag:</strong>&ensp;{day_spans}</div>
+        <div><strong>Tour:</strong>&ensp;{tour_spans}</div>
+    </div>
     """
 
 
