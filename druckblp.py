@@ -1113,6 +1113,9 @@ def export_css() -> str:
         .filter-btn.active .filter-count {
             background: rgba(0,0,0,0.2);
         }
+        .filter-btn-warn { color: #ff9966 !important; }
+        .filter-btn-warn:hover { color: #fff !important; background: rgba(255,100,50,0.2) !important; }
+        .filter-btn-warn.active { background: #c0392b !important; color: #fff !important; }
         .search-btn {
             border: 1px solid var(--border);
             border-radius: 7px;
@@ -1730,6 +1733,9 @@ def render_export_search_toolbar() -> str:
             <button type="button" class="filter-btn" data-kat="Direkt">
                 Direkt <span class="filter-count" id="cnt-direkt"></span>
             </button>
+            <button type="button" class="filter-btn filter-btn-warn" data-kat="ohne-csb">
+                Ohne CSB-Tour <span class="filter-count" id="cnt-ohne-csb"></span>
+            </button>
         </div>
 
         <div class="sidebar-subtitle-group">
@@ -1827,6 +1833,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 f'data-sap="{html.escape(sap.lower())}" '
                 f'data-csb="{html.escape(csb_search)}" '
                 f'data-kategorie="{html.escape(normalize_text(customer.get("Kategorie", "")))}" '
+                f'data-ohne-csb="{1 if not csb_touren else 0}" '
+                f'data-search="{html.escape(search_blob)}">'
                 f'data-search="{html.escape(search_blob)}">'
                 f'{"".join(entry_parts)}'
                 f'</section>'
@@ -1876,17 +1884,19 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         function updateCounts() {
             var q = norm(document.getElementById("search-input").value);
-            var counts = { alle: 0, MK: 0, Malchow: 0, NMS: 0, SuL: 0, Direkt: 0 };
+            var counts = { alle: 0, MK: 0, Malchow: 0, NMS: 0, SuL: 0, Direkt: 0, "ohne-csb": 0 };
             allEntries.forEach(function (e) {
                 var kat = e.getAttribute("data-kategorie") || "";
                 var blob = norm(e.getAttribute("data-search") || "");
+                var ohnecsb = e.getAttribute("data-ohne-csb") === "1";
                 var matchesSearch = !q || blob.indexOf(q) !== -1;
                 if (matchesSearch) {
                     counts.alle++;
                     if (counts[kat] !== undefined) counts[kat]++;
+                    if (ohnecsb) counts["ohne-csb"]++;
                 }
             });
-            var map = { alle: "cnt-alle", MK: "cnt-mk", Malchow: "cnt-malchow", NMS: "cnt-nms", SuL: "cnt-sul", Direkt: "cnt-direkt" };
+            var map = { alle: "cnt-alle", MK: "cnt-mk", Malchow: "cnt-malchow", NMS: "cnt-nms", SuL: "cnt-sul", Direkt: "cnt-direkt", "ohne-csb": "cnt-ohne-csb" };
             Object.keys(map).forEach(function (k) {
                 var el = document.getElementById(map[k]);
                 if (el) el.textContent = counts[k] !== undefined ? counts[k] : "";
@@ -1921,7 +1931,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             allEntries.forEach(function (entry) {
                 var kat  = entry.getAttribute("data-kategorie") || "";
                 var blob = norm(entry.getAttribute("data-search") || "");
-                var katOk  = activeKat === "alle" || kat === activeKat;
+                var ohnecsb = entry.getAttribute("data-ohne-csb") === "1";
+                var katOk  = activeKat === "alle" || kat === activeKat || (activeKat === "ohne-csb" && ohnecsb);
                 var srchOk = !q || blob.indexOf(q) !== -1;
                 var show   = katOk && srchOk;
                 entry.style.display = show ? "" : "none";
