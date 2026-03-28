@@ -1489,7 +1489,9 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
     days_present = [d for d in day_order if d in tour_by_day]
 
     # Tabulierte Spalten: Liefertag + Tour als zwei Textzeilen
-    col_w = "110px"  # einheitliche Spaltenbreite
+    n_cols = len(days_present)
+    label_w = "18mm"
+    col_w = f"calc((100% - {label_w}) / {n_cols})"
     day_spans = "".join(
         f'<span style="display:inline-block;width:{col_w}">{html.escape(d)}</span>' for d in days_present
     )
@@ -1500,8 +1502,8 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
 
     return f"""
     <div style="font-size:9pt; margin-bottom:2.5mm; line-height:1.6;">
-        <div><strong>Liefertag:</strong>&ensp;{day_spans}</div>
-        <div><strong>Tour:</strong>&ensp;{tour_spans}</div>
+        <div><strong style="display:inline-block;width:{label_w}">Liefertag:</strong>{day_spans}</div>
+        <div><strong style="display:inline-block;width:{label_w}">Tour:</strong>{tour_spans}</div>
     </div>
     """
 
