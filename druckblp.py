@@ -1292,7 +1292,7 @@ def export_css() -> str:
             padding: 1.5mm 3mm;
             vertical-align: top;
         }
-        .plan-table tr.day-start td { border-top: 0.5mm solid #666; }
+        .plan-table tr.day-start td { border-top: 1.2mm solid #222; }
         .plan-table td.liefertag-cell {
             font-weight: 700;
             width: 22mm;
