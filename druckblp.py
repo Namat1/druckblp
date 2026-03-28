@@ -1848,11 +1848,32 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     rows_html += "<tr>" + "".join(
                         f"<td>{html.escape(str(row[c]))}</td>" for c in cols
                     ) + "</tr>"
+            # CSV als data-URI für Download-Button
+            if not df.empty:
+                import base64 as _b64
+                _cols = list(df.columns)
+                _csv_lines = [";".join(_cols)]
+                for _, _row in df.iterrows():
+                    _csv_lines.append(";".join(str(_row[c]) for c in _cols))
+                _csv_bytes = "\n".join(_csv_lines).encode("utf-8-sig")
+                _csv_b64 = _b64.b64encode(_csv_bytes).decode()
+                _safe_title = title.replace("/", "-").replace(" ", "_")
+                export_btn = (
+                    f'<a class="dbg-export" ' 
+                    f'href="data:text/csv;base64,{_csv_b64}" ' 
+                    f'download="debug_{html.escape(_safe_title)}.csv">&#8595; CSV</a>'
+                )
+            else:
+                export_btn = ""
+
             sections.append(f"""
             <div class="dbg-section">
                 <div class="dbg-title" onclick="this.parentElement.classList.toggle('open')">
                     <span>{icon} {html.escape(title)}</span>
-                    <span class="dbg-count">{count}</span>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <span class="dbg-count">{count}</span>
+                        {export_btn}
+                    </div>
                 </div>
                 <div class="dbg-body">
                     <table class="dbg-table">
@@ -1861,6 +1882,30 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     </table>
                 </div>
             </div>""")
+
+        # Gesamt-Export aller nicht-leeren Reports
+        import base64 as _b64
+        _all_lines = []
+        for _t, _df in data.items():
+            if not _df.empty:
+                _all_lines.append(f"=== {_t} ===")
+                _cols = list(_df.columns)
+                _all_lines.append(";".join(_cols))
+                for _, _row in _df.iterrows():
+                    _all_lines.append(";".join(str(_row[c]) for c in _cols))
+                _all_lines.append("")
+        if _all_lines:
+            _all_bytes = "\n".join(_all_lines).encode("utf-8-sig")
+            _all_b64 = _b64.b64encode(_all_bytes).decode()
+            _gesamt_btn = (
+                f'<a class="dbg-gesamt-export" ' 
+                f'href="data:text/csv;base64,{_all_b64}" ' 
+                f'download="sendeplan_debug_gesamt.csv">&#8595; Alle exportieren</a>'
+            )
+        else:
+            _gesamt_btn = ""
+        sections.insert(0, f'<div style="padding:0 0 12px 0;">{_gesamt_btn}</div>')
+
         return "".join(sections)
 
     debug_html = _build_debug_html(debug_data)
@@ -2232,9 +2277,28 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             padding:5px 8px; border-bottom:1px solid rgba(255,255,255,0.05);
         }}
         .dbg-table tbody tr:hover td {{ background:rgba(255,255,255,0.04); }}
+        .dbg-export {{
+            font-size:10px; font-weight:600; color:#f0a500;
+            text-decoration:none; padding:2px 8px;
+            border:1px solid rgba(240,165,0,0.3);
+            border-radius:5px; white-space:nowrap;
+        }}
+        .dbg-export:hover {{ background:rgba(240,165,0,0.15); }}
+        .dbg-gesamt-export {{
+            display:inline-block; font-size:12px; font-weight:700;
+            color:#0d2035; background:var(--accent,#f0a500);
+            text-decoration:none; padding:7px 14px;
+            border-radius:8px; margin-bottom:4px;
+        }}
+        .dbg-gesamt-export:hover {{ opacity:0.9; }}
         </style>
         <script>
         function toggleDebug() {{ document.getElementById('debug-panel').classList.toggle('open'); }}
+        document.addEventListener('click', function(e) {{
+            if (e.target.classList.contains('dbg-export') || e.target.classList.contains('dbg-gesamt-export')) {{
+                e.stopPropagation();
+            }}
+        }});
         </script>
     </head>
     <body>
