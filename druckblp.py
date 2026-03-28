@@ -1984,34 +1984,41 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             }
         }
 
+        var _searchJumped = false;  // true wenn Auto-Jump die Kategorie gesetzt hat
+        var _fromSearch = false;    // true wenn applyFilter von Sucheingabe getriggert wird
+
         function applyFilter() {
             var q = norm(document.getElementById("search-input").value);
             clearHighlights();
             matches = [];
             cursor  = -1;
 
-            // Auto-Jump: bei Sucheingabe zur Kategorie des ersten Treffers wechseln
-            if (q) {
-                var firstMatch = null;
-                for (var i = 0; i < allEntries.length; i++) {
-                    var blob = norm(allEntries[i].getAttribute("data-search") || "");
-                    if (blob.indexOf(q) !== -1) { firstMatch = allEntries[i]; break; }
-                }
-                if (firstMatch) {
-                    var kat = firstMatch.getAttribute("data-kategorie") || "";
-                    if (kat && kat !== activeKat) {
-                        activeKat = kat;
-                        document.querySelectorAll(".filter-btn").forEach(function (b) {
-                            b.classList.toggle("active", b.getAttribute("data-kat") === kat);
-                        });
+            // Auto-Jump: nur wenn von Sucheingabe getriggert
+            if (_fromSearch) {
+                if (q) {
+                    var firstMatch = null;
+                    for (var i = 0; i < allEntries.length; i++) {
+                        var blob = norm(allEntries[i].getAttribute("data-search") || "");
+                        if (blob.indexOf(q) !== -1) { firstMatch = allEntries[i]; break; }
                     }
+                    if (firstMatch) {
+                        var kat = firstMatch.getAttribute("data-kategorie") || "";
+                        if (kat && kat !== activeKat) {
+                            activeKat = kat;
+                            _searchJumped = true;
+                            document.querySelectorAll(".filter-btn").forEach(function (b) {
+                                b.classList.toggle("active", b.getAttribute("data-kat") === kat);
+                            });
+                        }
+                    }
+                } else if (_searchJumped) {
+                    activeKat = "alle";
+                    _searchJumped = false;
+                    document.querySelectorAll(".filter-btn").forEach(function (b) {
+                        b.classList.toggle("active", b.getAttribute("data-kat") === "alle");
+                    });
                 }
-            } else if (activeKat !== "alle") {
-                // Suche geleert → zurück auf "Alle"
-                activeKat = "alle";
-                document.querySelectorAll(".filter-btn").forEach(function (b) {
-                    b.classList.toggle("active", b.getAttribute("data-kat") === "alle");
-                });
+                _fromSearch = false;
             }
 
             allEntries.forEach(function (entry) {
@@ -2067,7 +2074,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             var _searchTimer = null;
             document.getElementById("search-input").addEventListener("input", function () {
                 clearTimeout(_searchTimer);
-                _searchTimer = setTimeout(applyFilter, 150);
+                _searchTimer = setTimeout(function () { _fromSearch = true; applyFilter(); }, 150);
             });
             document.getElementById("btn-next").addEventListener("click",  function () { step(1); });
             document.getElementById("btn-prev").addEventListener("click",  function () { step(-1); });
@@ -2082,6 +2089,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             document.querySelectorAll(".filter-btn").forEach(function (btn) {
                 btn.addEventListener("click", function () {
                     activeKat = btn.getAttribute("data-kat");
+                    _searchJumped = false;  // manueller Klick überschreibt Auto-Jump
                     document.querySelectorAll(".filter-btn").forEach(function (b) {
                         b.classList.toggle("active", b === btn);
                     });
@@ -2563,19 +2571,24 @@ def main() -> None:
             placeholder="zum Beispiel 211393 oder Kunde",
         )
 
-        # Auto-Jump: bei Sucheingabe automatisch zur Kategorie des ersten Treffers wechseln
+        # Auto-Jump: nur wenn sich der Suchtext gerade geändert hat
         _search = normalize_text(st.session_state.search_text).lower()
+        _prev_search = st.session_state.get("_prev_search_text", "")
+        _search_changed = _search != _prev_search
+        st.session_state["_prev_search_text"] = _search
+
+        if _search_changed:
+            if _search:
+                _all_matches = filter_customers(customers_df, "Alle", st.session_state.search_text)
+                if not _all_matches.empty:
+                    _first_kat = normalize_text(_all_matches.iloc[0].get("Kategorie", "Alle"))
+                    if _first_kat in KATEGORIEN and _first_kat != "Alle":
+                        st.session_state.category_filter = _first_kat
+            elif st.session_state.get("_search_was_active"):
+                st.session_state.category_filter = "Alle"
+                st.session_state["_search_was_active"] = False
         if _search:
-            _all_matches = filter_customers(customers_df, "Alle", st.session_state.search_text)
-            if not _all_matches.empty:
-                _first_kat = normalize_text(_all_matches.iloc[0].get("Kategorie", "Alle"))
-                if _first_kat in KATEGORIEN and _first_kat != "Alle":
-                    st.session_state.category_filter = _first_kat
             st.session_state["_search_was_active"] = True
-        elif st.session_state.get("_search_was_active"):
-            # Suche wurde geleert → zurück auf "Alle"
-            st.session_state.category_filter = "Alle"
-            st.session_state["_search_was_active"] = False
 
         category = st.radio(
             "Kategorie",
