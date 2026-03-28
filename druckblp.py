@@ -733,45 +733,74 @@ def build_debug_report(
     """Erstellt Qualitäts-Reports für SAP ↔ Kisoft Abgleich."""
     reports: Dict[str, pd.DataFrame] = {}
 
+    def safe_cols(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+        """Nur Spalten auswählen die wirklich vorhanden sind."""
+        return df[[c for c in cols if c in df.columns]]
+
     # 1. SAP-Zeilen ohne Kisoft-Match (kein CSB Tournummer)
-    no_kisoft = plan_rows[
-        plan_rows["CSB Tournummer"].map(normalize_text) == ""
-    ][["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Liefertag_Raw", "Liefertag", "Sortiment"]].drop_duplicates()
-    reports["Kein Kisoft-Match"] = no_kisoft.reset_index(drop=True)
+    csb_col = "CSB Tournummer"
+    if csb_col in plan_rows.columns:
+        no_kisoft = plan_rows[
+            plan_rows[csb_col].map(normalize_text) == ""
+        ]
+        reports["Kein Kisoft-Match"] = safe_cols(
+            no_kisoft, ["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Liefertag_Raw", "Liefertag", "Sortiment"]
+        ).drop_duplicates().reset_index(drop=True)
+    else:
+        reports["Kein Kisoft-Match"] = pd.DataFrame()
 
     # 2. Liefertag aus Fallback (Spalte G leer oder ungültig)
-    fallback_rows = plan_rows[
-        plan_rows["Liefertag_Raw"].map(lambda v: not normalize_digits(normalize_text(v)) or
-            not normalize_digits(normalize_text(v))[0].isdigit())
-    ][["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "Liefertag", "CSB Tournummer", "Sortiment"]].drop_duplicates()
-    reports["Liefertag aus Fallback (Spalte G leer)"] = fallback_rows.reset_index(drop=True)
+    if "Liefertag_Raw" in plan_rows.columns:
+        fallback_mask = plan_rows["Liefertag_Raw"].map(
+            lambda v: not normalize_digits(normalize_text(v)) or
+                      not normalize_digits(normalize_text(v))[0].isdigit()
+        )
+        reports["Liefertag aus Fallback (Spalte G leer)"] = safe_cols(
+            plan_rows[fallback_mask],
+            ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "Liefertag", "CSB Tournummer", "Sortiment"]
+        ).drop_duplicates().reset_index(drop=True)
+    else:
+        reports["Liefertag aus Fallback (Spalte G leer)"] = pd.DataFrame()
 
     # 3. Liefertag-Konflikt: Spalte G weicht von CSB-Startzahl ab
     def _liefertag_konflikt(row):
-        g = normalize_digits(normalize_text(row.get("Liefertag_Raw", "")))
+        g   = normalize_digits(normalize_text(row.get("Liefertag_Raw", "")))
         csb = normalize_digits(normalize_text(row.get("CSB Tournummer", "")))
         if not g or not g[0].isdigit() or not csb or not csb[0].isdigit():
             return False
         return g[0] != csb[0]
-    konflikt = plan_rows[plan_rows.apply(_liefertag_konflikt, axis=1)][
-        ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "CSB Tournummer", "Liefertag", "Sortiment"]
-    ].drop_duplicates()
-    reports["Liefertag-Konflikt SAP↔CSB"] = konflikt.reset_index(drop=True)
+    if "Liefertag_Raw" in plan_rows.columns and csb_col in plan_rows.columns:
+        konflikt_mask = plan_rows.apply(_liefertag_konflikt, axis=1)
+        reports["Liefertag-Konflikt SAP↔CSB"] = safe_cols(
+            plan_rows[konflikt_mask],
+            ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "CSB Tournummer", "Liefertag", "Sortiment"]
+        ).drop_duplicates().reset_index(drop=True)
+    else:
+        reports["Liefertag-Konflikt SAP↔CSB"] = pd.DataFrame()
 
-    # 4. Kunden ohne Kategorie-Match (Direkt obwohl keine Tour erkannt)
-    unklar = plan_rows[
-        (plan_rows["Kategorie"] == "Direkt") &
-        (plan_rows["CSB Tournummer"].map(normalize_text) == "")
-    ][["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Sortiment"]].drop_duplicates()
-    reports["Direkt ohne CSB-Tour"] = unklar.reset_index(drop=True)
+    # 4. Direkt-Kunden ohne CSB-Tour
+    if csb_col in plan_rows.columns and "Kategorie" in plan_rows.columns:
+        unklar_mask = (
+            (plan_rows["Kategorie"] == "Direkt") &
+            (plan_rows[csb_col].map(normalize_text) == "")
+        )
+        reports["Direkt ohne CSB-Tour"] = safe_cols(
+            plan_rows[unklar_mask],
+            ["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Sortiment"]
+        ).drop_duplicates().reset_index(drop=True)
+    else:
+        reports["Direkt ohne CSB-Tour"] = pd.DataFrame()
 
-    # 5. Doppelte SAP-Zeilen nach Merge (gleiche SAP+Liefertag+Sortiment, verschiedene Touren)
-    dupes = plan_rows[
-        plan_rows.duplicated(subset=["SAP_Nr", "Liefertag", "Liefertyp_ID"], keep=False)
-    ][["SAP_Nr", "Name", "Liefertag", "Liefertyp_ID", "Sortiment", "CSB Tournummer", "Rahmentour_Raw"]].sort_values(
-        ["SAP_Nr", "Liefertag"]
-    )
-    reports["Mögliche Duplikate"] = dupes.reset_index(drop=True)
+    # 5. Mögliche Duplikate (gleicher Kunde + Liefertag + Sortiment, verschiedene Touren)
+    dedup_cols = [c for c in ["SAP_Nr", "Liefertag", "Liefertyp_ID"] if c in plan_rows.columns]
+    if dedup_cols:
+        dupes_mask = plan_rows.duplicated(subset=dedup_cols, keep=False)
+        reports["Mögliche Duplikate"] = safe_cols(
+            plan_rows[dupes_mask],
+            ["SAP_Nr", "Name", "Liefertag", "Liefertyp_ID", "Sortiment", "CSB Tournummer", "Rahmentour_Raw"]
+        ).sort_values([c for c in ["SAP_Nr", "Liefertag"] if c in plan_rows.columns]).reset_index(drop=True)
+    else:
+        reports["Mögliche Duplikate"] = pd.DataFrame()
 
     return reports
 
