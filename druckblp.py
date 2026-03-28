@@ -1990,6 +1990,30 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             matches = [];
             cursor  = -1;
 
+            // Auto-Jump: bei Sucheingabe zur Kategorie des ersten Treffers wechseln
+            if (q) {
+                var firstMatch = null;
+                for (var i = 0; i < allEntries.length; i++) {
+                    var blob = norm(allEntries[i].getAttribute("data-search") || "");
+                    if (blob.indexOf(q) !== -1) { firstMatch = allEntries[i]; break; }
+                }
+                if (firstMatch) {
+                    var kat = firstMatch.getAttribute("data-kategorie") || "";
+                    if (kat && kat !== activeKat) {
+                        activeKat = kat;
+                        document.querySelectorAll(".filter-btn").forEach(function (b) {
+                            b.classList.toggle("active", b.getAttribute("data-kat") === kat);
+                        });
+                    }
+                }
+            } else if (activeKat !== "alle") {
+                // Suche geleert → zurück auf "Alle"
+                activeKat = "alle";
+                document.querySelectorAll(".filter-btn").forEach(function (b) {
+                    b.classList.toggle("active", b.getAttribute("data-kat") === "alle");
+                });
+            }
+
             allEntries.forEach(function (entry) {
                 var kat  = entry.getAttribute("data-kategorie") || "";
                 var blob = norm(entry.getAttribute("data-search") || "");
@@ -2538,6 +2562,20 @@ def main() -> None:
             key="search_text",
             placeholder="zum Beispiel 211393 oder Kunde",
         )
+
+        # Auto-Jump: bei Sucheingabe automatisch zur Kategorie des ersten Treffers wechseln
+        _search = normalize_text(st.session_state.search_text).lower()
+        if _search:
+            _all_matches = filter_customers(customers_df, "Alle", st.session_state.search_text)
+            if not _all_matches.empty:
+                _first_kat = normalize_text(_all_matches.iloc[0].get("Kategorie", "Alle"))
+                if _first_kat in KATEGORIEN and _first_kat != "Alle":
+                    st.session_state.category_filter = _first_kat
+            st.session_state["_search_was_active"] = True
+        elif st.session_state.get("_search_was_active"):
+            # Suche wurde geleert → zurück auf "Alle"
+            st.session_state.category_filter = "Alle"
+            st.session_state["_search_was_active"] = False
 
         category = st.radio(
             "Kategorie",
