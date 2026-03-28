@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import numpy as np
 import openpyxl
 import pandas as pd
 import streamlit as st
@@ -553,7 +554,7 @@ def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataF
 
     Der Kostenstellenplan enthaelt numerische Bereiche (sap_von/sap_bis).
     Die CSB-Tournummer (4-stellig, z.B. 4007) wird numerisch gegen diese
-    Bereiche geprueft. Vectorisiert via pd.IntervalIndex.
+    Bereiche geprueft. Vectorisiert via numpy Broadcasting.
     """
     table = df_kostenstellen.copy()
     table["sap_von_num"] = pd.to_numeric(table["sap_von"], errors="coerce")
@@ -568,27 +569,34 @@ def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataF
         result["Leiter"] = ""
         return result
 
-    # IntervalIndex für schnelles Range-Matching
-    intervals = pd.IntervalIndex.from_arrays(
-        table["sap_von_num"], table["sap_bis_num"], closed="both"
-    )
-
     # CSB Tournummern als numerische Werte
     csb_nums = pd.to_numeric(
         result["CSB Tournummer"].map(normalize_digits), errors="coerce"
-    )
+    ).values
 
-    # Vectorisierter Lookup via get_indexer
-    idx = intervals.get_indexer(csb_nums.values)
+    # Vectorisierter Lookup: Kostenstellen-Tabelle ist klein (~50 Zeilen),
+    # daher Loop über Tabelle mit numpy-vectorisierten Vergleichen über alle plan_rows.
+    # Erster Treffer gewinnt (wie im Original).
+    n = len(result)
+    match_idx = np.full(n, -1, dtype=int)
+
+    vons = table["sap_von_num"].values
+    biss = table["sap_bis_num"].values
+
+    for i in range(len(table)):
+        # Nur Zeilen matchen die noch keinen Treffer haben
+        unmatched = match_idx == -1
+        in_range = (csb_nums >= vons[i]) & (csb_nums <= biss[i]) & unmatched
+        match_idx[in_range] = i
 
     # Ergebnis-Spalten aus Lookup-Index ableiten
-    matched = idx >= 0
+    matched = match_idx >= 0
     result["Tourengruppe"] = ""
     result["Kostenstelle"] = ""
     result["Leiter"] = ""
 
     if matched.any():
-        valid_idx = idx[matched]
+        valid_idx = match_idx[matched]
         result.loc[matched, "Tourengruppe"] = table["tourengruppe"].iloc[valid_idx].map(normalize_text).values
         result.loc[matched, "Kostenstelle"] = table["kostenstelle"].iloc[valid_idx].map(normalize_text).values
         result.loc[matched, "Leiter"] = table["leiter"].iloc[valid_idx].map(normalize_text).values
