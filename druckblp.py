@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import html
 import io
 import re
@@ -6,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import openpyxl
 import pandas as pd
 import streamlit as st
 
@@ -122,10 +124,6 @@ def classify_by_csb_tour(csb_tour: str) -> str:
         return "NMS"
     return "Direkt"
 
-
-def classify_customer(rahmentour_raw: str, csb_nr: str) -> str:
-    """Fallback-Klassifizierung (wird überschrieben sobald CSB Tournummer bekannt ist)."""
-    return "Direkt"
 
 
 def validate_required_columns(df: pd.DataFrame, required_columns: List[str], name: str) -> None:
@@ -322,8 +320,7 @@ def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: s
         raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
     else:
         # Excel: richtiges Sheet suchen (enthaelt numerische SAP-Bereiche in Spalte B)
-        import openpyxl as _openpyxl
-        _wb = _openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+        _wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
         _chosen = None
         for _sname in _wb.sheetnames:
             _ws = _wb[_sname]
@@ -422,11 +419,7 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
     Ergebnis-DataFrame: tourengruppe | liefertag | sortiment | bestelltag | bestellzeitende
     """
-    import openpyxl as _opx
-    import io as _io
-    import re as _re
-
-    wb = _opx.load_workbook(_io.BytesIO(file_bytes), read_only=True)
+    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
     if "CSB Standard" not in wb.sheetnames:
         return pd.DataFrame(columns=["tourengruppe","liefertag","sortiment","bestelltag","bestellzeitende"])
 
@@ -457,7 +450,7 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
         if b is None:
             continue
         b_str = str(b).strip()
-        if not _re.search(r'\d', b_str):
+        if not re.search(r'\d', b_str):
             continue
 
         # Für jede Zusatz-Gruppe
@@ -513,43 +506,42 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
         .copy()
     )
 
-    # Normalize Tourengruppe in schedule for matching
+    # Normalize für Merge
     sched = zusatz_schedule.copy()
-    sched["tourengruppe_norm"] = sched["tourengruppe"].str.strip().str.lower()
-    basis["tourengruppe_norm"] = basis["Tourengruppe"].str.strip().str.lower()
+    sched["_tg_norm"] = sched["tourengruppe"].str.strip().str.lower()
+    sched["_lt_norm"] = sched["liefertag"].str.strip().str.lower()
+    basis["_tg_norm"] = basis["Tourengruppe"].str.strip().str.lower()
+    basis["_lt_norm"] = basis["Liefertag"].str.strip().str.lower()
 
-    new_rows = []
-    for _, base in basis.iterrows():
-        tg_norm   = base["tourengruppe_norm"]
-        liefertag = base["Liefertag"]
-        if not tg_norm or not liefertag:
-            continue
+    # Leere Tourengruppen / Liefertage ausfiltern
+    basis = basis[(basis["_tg_norm"] != "") & (basis["_lt_norm"] != "")]
 
-        matches = sched[
-            (sched["tourengruppe_norm"] == tg_norm) &
-            (sched["liefertag"].str.lower() == liefertag.lower())
-        ]
-
-        for _, m in matches.iterrows():
-            new_row = base.drop("tourengruppe_norm").to_dict()
-            new_row["Sortiment"]       = m["sortiment"]
-            new_row["Bestelltag_Name"] = m["bestelltag"]
-            new_row["Bestellzeitende"] = m["bestellzeitende"]
-            new_row["Liefertag"]       = liefertag
-            new_row["SortKey_Sortiment"] = m["sortiment"]
-            new_row["_ist_zusatz"]     = True  # Markierung: synthetische Zusatz-Zeile
-            new_rows.append(new_row)
-
-    if not new_rows:
+    if basis.empty:
         return plan_rows
 
-    zusatz_df = pd.DataFrame(new_rows)
-    # Fehlende Spalten auffuellen
-    for col in plan_rows.columns:
-        if col not in zusatz_df.columns:
-            zusatz_df[col] = ""
+    # Merge statt doppeltem iterrows
+    merged = basis.merge(sched, on=["_tg_norm", "_lt_norm"], how="inner")
 
-    combined = pd.concat([plan_rows, zusatz_df[plan_rows.columns]], ignore_index=True)
+    if merged.empty:
+        return plan_rows
+
+    # Zusatz-Spalten setzen
+    merged["Sortiment"] = merged["sortiment"]
+    merged["Bestelltag_Name"] = merged["bestelltag"]
+    merged["Bestellzeitende"] = merged["bestellzeitende"]
+    merged["SortKey_Sortiment"] = merged["sortiment"]
+    merged["_ist_zusatz"] = True
+
+    # Aufräumen: nur plan_rows-Spalten behalten, Rest auffüllen
+    drop_cols = ["_tg_norm", "_lt_norm", "tourengruppe", "liefertag", "sortiment",
+                 "bestelltag", "bestellzeitende"]
+    merged = merged.drop(columns=[c for c in drop_cols if c in merged.columns], errors="ignore")
+
+    for col in plan_rows.columns:
+        if col not in merged.columns:
+            merged[col] = ""
+
+    combined = pd.concat([plan_rows, merged[plan_rows.columns]], ignore_index=True)
     return combined
 
 
@@ -561,30 +553,46 @@ def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataF
 
     Der Kostenstellenplan enthaelt numerische Bereiche (sap_von/sap_bis).
     Die CSB-Tournummer (4-stellig, z.B. 4007) wird numerisch gegen diese
-    Bereiche geprueft. Das Ergebnis wird je plan_row gesetzt.
+    Bereiche geprueft. Vectorisiert via pd.IntervalIndex.
     """
     table = df_kostenstellen.copy()
     table["sap_von_num"] = pd.to_numeric(table["sap_von"], errors="coerce")
     table["sap_bis_num"] = pd.to_numeric(table["sap_bis"], errors="coerce")
-    table = table.dropna(subset=["sap_von_num", "sap_bis_num"])
-
-    def lookup_csb(csb_tour: str) -> pd.Series:
-        empty = pd.Series({"Tourengruppe": "", "Kostenstelle": "", "Leiter": ""})
-        num = pd.to_numeric(normalize_digits(csb_tour), errors="coerce")
-        if pd.isna(num):
-            return empty
-        match = table[(table["sap_von_num"] <= num) & (table["sap_bis_num"] >= num)]
-        if match.empty:
-            return empty
-        row = match.iloc[0]
-        return pd.Series({
-            "Tourengruppe": normalize_text(row["tourengruppe"]),
-            "Kostenstelle": normalize_text(row["kostenstelle"]),
-            "Leiter":       normalize_text(row["leiter"]),
-        })
+    table = table.dropna(subset=["sap_von_num", "sap_bis_num"]).reset_index(drop=True)
 
     result = df_plan.copy()
-    result[["Tourengruppe", "Kostenstelle", "Leiter"]] = result["CSB Tournummer"].apply(lookup_csb)
+
+    if table.empty:
+        result["Tourengruppe"] = ""
+        result["Kostenstelle"] = ""
+        result["Leiter"] = ""
+        return result
+
+    # IntervalIndex für schnelles Range-Matching
+    intervals = pd.IntervalIndex.from_arrays(
+        table["sap_von_num"], table["sap_bis_num"], closed="both"
+    )
+
+    # CSB Tournummern als numerische Werte
+    csb_nums = pd.to_numeric(
+        result["CSB Tournummer"].map(normalize_digits), errors="coerce"
+    )
+
+    # Vectorisierter Lookup via get_indexer
+    idx = intervals.get_indexer(csb_nums.values)
+
+    # Ergebnis-Spalten aus Lookup-Index ableiten
+    matched = idx >= 0
+    result["Tourengruppe"] = ""
+    result["Kostenstelle"] = ""
+    result["Leiter"] = ""
+
+    if matched.any():
+        valid_idx = idx[matched]
+        result.loc[matched, "Tourengruppe"] = table["tourengruppe"].iloc[valid_idx].map(normalize_text).values
+        result.loc[matched, "Kostenstelle"] = table["kostenstelle"].iloc[valid_idx].map(normalize_text).values
+        result.loc[matched, "Leiter"] = table["leiter"].iloc[valid_idx].map(normalize_text).values
+
     return result
 
 
@@ -629,15 +637,6 @@ def prepare_dataframes(
         subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID", "Rahmentour_Raw"], keep="first"
     ).copy()
 
-    def infer_liefertag(row: pd.Series) -> str:
-        # Liefertag ausschließlich aus SAP Spalte G (immer befüllt, 1=Mo … 6=Sa)
-        liefertag_raw = normalize_digits(row.get("Liefertag_Raw", ""))
-        if liefertag_raw and liefertag_raw[0].isdigit():
-            day = int(liefertag_raw[0])
-            if day in WOCHENTAGE:
-                return WOCHENTAGE[day]
-        return "Unbekannt"
-
     kunden_basis = df_kunden.merge(
         df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates(subset=["SAP_Nr"]),
         on="SAP_Nr",
@@ -654,7 +653,13 @@ def prepare_dataframes(
         how="left",
     )
 
-    plan_rows["Liefertag"] = plan_rows.apply(infer_liefertag, axis=1)
+    # Liefertag vectorisiert aus SAP Spalte G (1=Mo … 6=Sa)
+    plan_rows["Liefertag"] = (
+        plan_rows["Liefertag_Raw"]
+        .map(normalize_digits)
+        .str[:1]
+        .map(lambda d: WOCHENTAGE.get(int(d), "Unbekannt") if d.isdigit() else "Unbekannt")
+    )
     plan_rows["Sortiment"] = plan_rows["Liefertyp_Name"].fillna("")
     plan_rows["Bestellzeitende"] = plan_rows["Bestellzeitende"].fillna("")
     plan_rows["CSB Tournummer"] = plan_rows["CSB Tournummer"].fillna("")
@@ -862,15 +867,13 @@ def build_debug_report(
 
 def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
     """Zeigt Debug-Reports im Streamlit-Tab."""
-    import io as _io
-
     total_issues = sum(len(df) for df in reports.values())
     if total_issues == 0:
         st.success("✅ Keine Auffälligkeiten gefunden – SAP und Kisoft sind konsistent.")
         return
 
     # Gesamt-Export aller Reports als Excel (ein Sheet pro Report)
-    _buf = _io.BytesIO()
+    _buf = io.BytesIO()
     with pd.ExcelWriter(_buf, engine="openpyxl") as _writer:
         for _title, _df in reports.items():
             if not _df.empty:
@@ -895,7 +898,7 @@ def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
             else:
                 st.dataframe(df, use_container_width=True, hide_index=True)
                 # Download für diesen Report
-                _buf2 = _io.BytesIO()
+                _buf2 = io.BytesIO()
                 df.to_excel(_buf2, index=False, engine="openpyxl")
                 _buf2.seek(0)
                 _safe = title.replace("/", "-").replace(" ", "_")
@@ -1700,9 +1703,9 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     leiter       = normalize_text(customer.get("Leiter", ""))
     stand = datetime.now().strftime("%d.%m.%Y")
 
-    # Tourengruppe -> Subtitle (Standart / NMS / Malchow / MK …)
+    # Tourengruppe -> Subtitle (Standard / NMS / Malchow / MK …)
     kategorie = normalize_text(customer.get("Kategorie", ""))
-    subtitle = "Standart"  # Immer Standart – per contenteditable änderbar
+    subtitle = "Standard"  # Immer Standard – per contenteditable änderbar
 
     tour_overview_html = render_tour_overview(customer_rows)
     plan_table_html    = render_plan_table(customer_rows)
@@ -1826,7 +1829,7 @@ def render_export_search_toolbar() -> str:
         <div class="sidebar-subtitle-group">
             <div class="sidebar-label">Untertitel global \u00e4ndern</div>
             <input id="global-subtitle-input" type="text"
-                placeholder="z.B. Standart, NMS \u2026"
+                placeholder="z.B. Standard, NMS \u2026"
                 autocomplete="off" spellcheck="false" />
             <div class="search-nav-row" style="margin-top:6px;">
                 <button type="button" class="search-btn" id="btn-apply-subtitle">&#10003; Alle setzen</button>
@@ -1864,13 +1867,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     ) + "</tr>"
             # CSV als data-URI
             if not df.empty:
-                import base64 as _b64
                 _cols = list(df.columns)
                 _csv_lines = [";".join(_cols)]
                 for _, _row in df.iterrows():
                     _csv_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
                 _csv_bytes = "\n".join(_csv_lines).encode("utf-8-sig")
-                _csv_b64 = _b64.b64encode(_csv_bytes).decode()
+                _csv_b64 = base64.b64encode(_csv_bytes).decode()
                 _safe_title = title.replace("/", "-").replace(" ", "_")
                 export_btn = (
                     f'<a class="dbg-export" ' 
@@ -1898,7 +1900,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             </div>""")
 
         # Gesamt-Export aller nicht-leeren Reports
-        import base64 as _b64
         _all_lines = []
         for _t, _df in data.items():
             if not _df.empty:
@@ -1910,7 +1911,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 _all_lines.append("")
         if _all_lines:
             _all_bytes = "\n".join(_all_lines).encode("utf-8-sig")
-            _all_b64 = _b64.b64encode(_all_bytes).decode()
+            _all_b64 = base64.b64encode(_all_bytes).decode()
             _gesamt_btn = (
                 f'<a class="dbg-gesamt-export" ' 
                 f'href="data:text/csv;base64,{_all_b64}" ' 
@@ -1925,10 +1926,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     debug_html = _build_debug_html(debug_data)
     docs: List[str] = []
 
+    # Vorab gruppieren statt pro Kunde den gesamten DataFrame zu filtern
+    _plan_grouped = {sap: grp for sap, grp in plan_rows.groupby("SAP_Nr")}
+
     entry_count = 0
     for _, customer in customers.iterrows():
-        rows = plan_rows[plan_rows["SAP_Nr"] == customer["SAP_Nr"]].copy()
         sap = normalize_text(customer.get("SAP_Nr", ""))
+        rows = _plan_grouped.get(sap, pd.DataFrame(columns=plan_rows.columns)).copy()
         csb_nr = normalize_text(customer.get("CSB_Nr", ""))
         csb_touren = sorted({
             normalize_text(value)
@@ -1964,7 +1968,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 f'data-csb="{html.escape(csb_search)}" '
                 f'data-kategorie="{html.escape(normalize_text(customer.get("Kategorie", "")))}" '
                 f'data-ohne-csb="{1 if not csb_touren else 0}" '
-                f'data-search="{html.escape(search_blob)}">'
                 f'data-search="{html.escape(search_blob)}">'
                 f'{"".join(entry_parts)}'
                 f'</section>'
@@ -2107,7 +2110,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         document.addEventListener("DOMContentLoaded", function () {
             allEntries = Array.from(document.querySelectorAll(".customer-entry"));
 
-            document.getElementById("search-input").addEventListener("input", applyFilter);
+            // Debounce: bei schnellem Tippen nicht bei jedem Tastendruck filtern
+            var _searchTimer = null;
+            document.getElementById("search-input").addEventListener("input", function () {
+                clearTimeout(_searchTimer);
+                _searchTimer = setTimeout(applyFilter, 150);
+            });
             document.getElementById("btn-next").addEventListener("click",  function () { step(1); });
             document.getElementById("btn-prev").addEventListener("click",  function () { step(-1); });
             document.getElementById("btn-reset").addEventListener("click", resetSearch);
@@ -2144,13 +2152,17 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             updateSearchCount();
             updateCounts();
 
-            // ── Inhalt auf A4 skalieren (zoom, batched reads+writes) ──
+            // ── Inhalt auf A4 skalieren (zoom + Firefox-Fallback via transform) ──
+            var supportsZoom = 'zoom' in document.documentElement.style &&
+                !/firefox/i.test(navigator.userAgent);
+
             function fitToPage() {
                 var inners = Array.from(document.querySelectorAll(".paper-inner"));
                 // Reset zuerst – alle auf einmal damit Layout stabil ist
                 inners.forEach(function (el) {
                     el.style.zoom = "";
                     el.style.transform = "";
+                    el.style.transformOrigin = "";
                     el.style.width = "210mm";
                 });
                 // Alle Reads in einem Durchgang (kein Reflow-Thrashing)
@@ -2171,7 +2183,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                         1
                     );
                     if (scale < 1) {
-                        m.inner.style.zoom = scale;
+                        if (supportsZoom) {
+                            m.inner.style.zoom = scale;
+                        } else {
+                            m.inner.style.transform = "scale(" + scale + ")";
+                            m.inner.style.transformOrigin = "top left";
+                        }
                         m.inner.style.width = "210mm";
                     }
                 });
@@ -2180,7 +2197,11 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             requestAnimationFrame(function () {
                 requestAnimationFrame(fitToPage);
             });
-            window.addEventListener("resize", fitToPage);
+            var _resizeTimer = null;
+            window.addEventListener("resize", function () {
+                clearTimeout(_resizeTimer);
+                _resizeTimer = setTimeout(fitToPage, 200);
+            });
 
             // ── Aktuell sichtbaren Kunden tracken (IntersectionObserver) ──
             var currentVisible = null;
@@ -2546,23 +2567,9 @@ def main() -> None:
         show_onboarding(upload_map)
         return
 
-    # ── SAP-Rohdaten direkt prüfen (vor prepare_dataframes) ──
-    if sap_file is not None:
-        with st.sidebar.expander("🔎 SAP-Rohcheck", expanded=False):
-            try:
-                import io as _io
-                import pandas as _pd
-                _raw = _pd.read_excel(_io.BytesIO(sap_file.getvalue()), header=None, dtype=str)
-                st.write(f"Zeilen: {len(_raw)}, Spalten: {_raw.shape[1]}")
-                st.write("Spalte A (erste 5):", _raw.iloc[:5, 0].tolist())
-                st.write("Spalte G (erste 5):", _raw.iloc[:5, 6].tolist() if _raw.shape[1] > 6 else "fehlt")
-            except Exception as _e:
-                st.error(f"Fehler: {_e}")
-
     try:
         # Cache-Key aus Datei-Hashes – nur neu berechnen wenn Dateien sich ändern
-        import hashlib as _hashlib
-        _cache_key = _hashlib.md5(
+        _cache_key = hashlib.md5(
             kunden_file.getvalue() + sap_file.getvalue() +
             transport_file.getvalue() + kisoft_file.getvalue() +
             kostenstellen_file.getvalue() + (csv_separator or ";").encode()
@@ -2586,6 +2593,9 @@ def main() -> None:
         st.error(f"Die hochgeladenen Dateien konnten nicht verarbeitet werden: {exc}")
         render_panel("Hinweis", upload_status_lines(upload_map))
         return
+
+    # Debug-Report einmal berechnen, in Export-Tab und Debug-Tab verwenden
+    debug_reports = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
 
     with st.sidebar:
         st.divider()
@@ -2622,8 +2632,7 @@ def main() -> None:
         else:
             st.session_state.selected_sap = ""
 
-    filtered_customers = filter_customers(customers_df, st.session_state.category_filter, st.session_state.search_text)
-
+    # filtered_customers aus dem Sidebar-Scope ist hier weiter gültig
     overview_tab, preview_tab, export_tab, debug_tab = st.tabs(["Übersicht", "Kundenvorschau", "Export", "🔍 Debug"])
 
     with overview_tab:
@@ -2698,10 +2707,9 @@ def main() -> None:
                 logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
                              "png": "image/png", "svg": "image/svg+xml",
                              "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
-            _debug_reports = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
             bulk_html = build_full_document_html(filtered_customers, plan_rows_df,
                             logo_b64=logo_b64, logo_mime=logo_mime,
-                            debug_data=_debug_reports)
+                            debug_data=debug_reports)
             filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
 
             col1, col2 = st.columns(2)
@@ -2731,7 +2739,6 @@ def main() -> None:
     with debug_tab:
         st.subheader("SAP ↔ Kisoft Qualitätsprüfung")
         st.write("Überprüft ob alle Rahmentouren in Kisoft gepflegt sind und ob Liefertage konsistent sind.")
-        debug_reports = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
         render_debug_tab(debug_reports)
 
 
