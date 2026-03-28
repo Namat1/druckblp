@@ -753,22 +753,7 @@ def build_debug_report(
     else:
         reports["Kein Kisoft-Match"] = pd.DataFrame()
 
-    # 2. Liefertag aus Fallback (Spalte G leer oder ungültig)
-    if "Liefertag_Raw" in plan_rows.columns:
-        # Zusatz-Sortimente (AVO, Werbemittel etc.) haben keine SAP-Zeile → herausfiltern
-        _nur_sap = plan_rows[plan_rows.get("_ist_zusatz", pd.Series(False, index=plan_rows.index)).fillna(False) == False] if "_ist_zusatz" in plan_rows.columns else plan_rows
-        fallback_mask = _nur_sap["Liefertag_Raw"].map(
-            lambda v: not normalize_digits(normalize_text(v)) or
-                      not normalize_digits(normalize_text(v))[0].isdigit()
-        )
-        reports["Liefertag aus Fallback (Spalte G leer)"] = safe_cols(
-            _nur_sap[fallback_mask],
-            ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "Liefertag", "CSB Tournummer", "Sortiment"]
-        ).drop_duplicates().reset_index(drop=True)
-    else:
-        reports["Liefertag aus Fallback (Spalte G leer)"] = pd.DataFrame()
-
-    # 3. Liefertag-Konflikt: Spalte G weicht von CSB-Startzahl ab
+    # 2. Liefertag-Konflikt: Spalte G weicht von CSB-Startzahl ab
     def _liefertag_konflikt(row):
         g   = normalize_digits(normalize_text(row.get("Liefertag_Raw", "")))
         csb = normalize_digits(normalize_text(row.get("CSB Tournummer", "")))
@@ -797,18 +782,7 @@ def build_debug_report(
     else:
         reports["Direkt ohne CSB-Tour"] = pd.DataFrame()
 
-    # 5. Mögliche Duplikate (gleicher Kunde + Liefertag + Sortiment, verschiedene Touren)
-    dedup_cols = [c for c in ["SAP_Nr", "Liefertag", "Liefertyp_ID"] if c in plan_rows.columns]
-    if dedup_cols:
-        dupes_mask = plan_rows.duplicated(subset=dedup_cols, keep=False)
-        reports["Mögliche Duplikate"] = safe_cols(
-            plan_rows[dupes_mask],
-            ["SAP_Nr", "Name", "Liefertag", "Liefertyp_ID", "Sortiment", "CSB Tournummer", "Rahmentour_Raw"]
-        ).sort_values([c for c in ["SAP_Nr", "Liefertag"] if c in plan_rows.columns]).reset_index(drop=True)
-    else:
-        reports["Mögliche Duplikate"] = pd.DataFrame()
-
-    # 6. Kunden mit mehreren Touren an einem Tag (verschiedene CSB Tournummern)
+    # 4. Kunden mit mehreren Touren an einem Tag (verschiedene CSB Tournummern)
     if all(c in plan_rows.columns for c in ["SAP_Nr", "Liefertag", "CSB Tournummer"]):
         # Nur echte SAP-Zeilen (keine Zusatz-Sortimente), nur mit CSB Tour
         _sap_only = plan_rows[
