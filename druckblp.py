@@ -591,7 +591,7 @@ def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataF
     return result
 
 
-@st.cache_data(show_spinner=False, max_entries=3)
+@st.cache_data(show_spinner=False)
 def prepare_dataframes(
     kunden_bytes: bytes,
     kunden_name: str,
@@ -604,6 +604,7 @@ def prepare_dataframes(
     kostenstellen_bytes: bytes,
     kostenstellen_name: str,
     csv_separator: str,
+    _version: str = "v4",  # Erhöhen um Cache zu invalidieren
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int], pd.DataFrame, pd.DataFrame]:
     df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
     df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
@@ -2391,6 +2392,7 @@ def main() -> None:
             kostenstellen_file.getvalue(),
             kostenstellen_file.name,
             csv_separator or ";",
+            _version="v4",
         )
     except Exception as exc:
         st.error(f"Die hochgeladenen Dateien konnten nicht verarbeitet werden: {exc}")
