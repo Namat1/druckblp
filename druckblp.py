@@ -537,6 +537,7 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
             new_row["Bestellzeitende"] = m["bestellzeitende"]
             new_row["Liefertag"]       = liefertag
             new_row["SortKey_Sortiment"] = m["sortiment"]
+            new_row["_ist_zusatz"]     = True  # Markierung: synthetische Zusatz-Zeile
             new_rows.append(new_row)
 
     if not new_rows:
@@ -749,12 +750,14 @@ def build_debug_report(
 
     # 2. Liefertag aus Fallback (Spalte G leer oder ungültig)
     if "Liefertag_Raw" in plan_rows.columns:
-        fallback_mask = plan_rows["Liefertag_Raw"].map(
+        # Zusatz-Sortimente (AVO, Werbemittel etc.) haben keine SAP-Zeile → herausfiltern
+        _nur_sap = plan_rows[plan_rows.get("_ist_zusatz", pd.Series(False, index=plan_rows.index)).fillna(False) == False] if "_ist_zusatz" in plan_rows.columns else plan_rows
+        fallback_mask = _nur_sap["Liefertag_Raw"].map(
             lambda v: not normalize_digits(normalize_text(v)) or
                       not normalize_digits(normalize_text(v))[0].isdigit()
         )
         reports["Liefertag aus Fallback (Spalte G leer)"] = safe_cols(
-            plan_rows[fallback_mask],
+            _nur_sap[fallback_mask],
             ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "Liefertag", "CSB Tournummer", "Sortiment"]
         ).drop_duplicates().reset_index(drop=True)
     else:
