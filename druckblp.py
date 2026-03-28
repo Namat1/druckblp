@@ -17,7 +17,7 @@ st.set_page_config(
     page_title="Sendeplan-Generator",
     page_icon="📦",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 
@@ -919,100 +919,18 @@ def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str
 def streamlit_css() -> str:
     return """
     <style>
-        .stApp {
-            background: #f3f6fb;
-            color: #111827;
+        .stApp { background: #0e1117; color: #e0e0e0; }
+        .stApp p, .stApp li, .stApp label, .stApp div,
+        .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5,
+        .stApp span { color: #e0e0e0; }
+        section[data-testid="stSidebar"] { background: #161b22; border-right: 1px solid #21262d; }
+        .stFileUploader { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.4rem; }
+        div[data-baseweb="input"] input, .stTextInput input {
+            background: #0d1117 !important; color: #e0e0e0 !important; border-color: #30363d !important;
         }
-
-        .stApp, .stApp p, .stApp li, .stApp label, .stApp div,
-        .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5 {
-            color: #111827;
-        }
-
-        section[data-testid="stSidebar"] {
-            background: #f8fafc;
-            border-right: 1px solid #dbe3ef;
-        }
-
-        div[data-baseweb="input"] input,
-        div[data-baseweb="select"] input,
-        textarea,
-        .stTextInput input {
-            background: #ffffff !important;
-            color: #111827 !important;
-        }
-
-        .stFileUploader {
-            background: #ffffff;
-            border: 1px solid #d8e0ea;
-            border-radius: 14px;
-            padding: 0.6rem;
-        }
-
-        .app-panel {
-            background: #ffffff;
-            border: 1px solid #d8e0ea;
-            border-radius: 16px;
-            padding: 1rem 1.1rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.04);
-        }
-
-        .hero-card {
-            background: linear-gradient(135deg, #123a63 0%, #1f5d97 100%);
-            color: white;
-            border-radius: 18px;
-            padding: 1.3rem 1.4rem;
-            margin-bottom: 1rem;
-            box-shadow: 0 12px 24px rgba(18, 58, 99, 0.18);
-        }
-
-        .hero-card h1,
-        .hero-card h3,
-        .hero-card p,
-        .hero-card li {
-            color: white !important;
-        }
-
-        .muted-note {
-            color: #516074;
-            font-size: 0.95rem;
-        }
-
-        .status-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 0.75rem;
-        }
-
-        .status-item {
-            background: #f8fbff;
-            border: 1px solid #dbe7f3;
-            border-radius: 12px;
-            padding: 0.8rem 0.9rem;
-        }
-
-        .status-label {
-            font-size: 0.84rem;
-            color: #526173;
-            margin-bottom: 0.2rem;
-        }
-
-        .status-value {
-            font-weight: 700;
-            font-size: 1.02rem;
-            color: #123a63;
-        }
-
-        .upload-ok {
-            color: #166534;
-            font-weight: 600;
-        }
-
-        .upload-missing {
-            color: #92400e;
-            font-weight: 600;
-        }
+        .st-emotion-cache-1v0mbdj, .st-emotion-cache-1wmy9hl { color: #e0e0e0; }
+        .status-ok { color: #3fb950; font-size: 0.85rem; }
+        .status-miss { color: #f85149; font-size: 0.85rem; }
     </style>
     """
 
@@ -2468,72 +2386,49 @@ def main() -> None:
     init_session_state()
     st.markdown(streamlit_css(), unsafe_allow_html=True)
 
-    with st.sidebar:
-        st.title("Sendeplan")
-        st.caption("Uploads, Filter und Export")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            if st.button("🗑️ Cache leeren", use_container_width=True, help="Erzwingt Neuberechnung aller Daten"):
-                st.cache_data.clear()
-                st.rerun()
-        with col_b:
-            if st.button("🔄 App neu starten", use_container_width=True, help="Startet die App komplett neu"):
-                st.cache_data.clear()
-                st.cache_resource.clear()
-                st.rerun()
-        csv_separator = st.text_input("CSV-Trennzeichen", value=";", max_chars=1, key="csv_separator")
+    st.title("📦 Sendeplan-Generator")
 
-        kunden_file = st.file_uploader(
-            "Kundenliste",
-            type=["xlsx", "xls", "xlsm", "csv"],
-            help="Feste Spalten: A, I, J, K, L, M, N",
-        )
-        sap_file = st.file_uploader(
-            "SAP-Datei",
-            type=["xlsx", "xls", "xlsm", "csv"],
-            help="Feste Spalten: A, H, I, O, Y",
-        )
-        transport_file = st.file_uploader(
-            "Transportgruppen",
-            type=["xlsx", "xls", "xlsm", "csv"],
-            help="Feste Spalten: A, C",
-        )
-        kisoft_file = st.file_uploader(
-            "Kisoft-Datei",
-            type=["csv", "xlsx", "xls", "xlsm"],
-            help="Benötigte Felder: SAP Rahmentour, CSB Tournummer, Verladetor",
-        )
-        kostenstellen_file = st.file_uploader(
-            "Kostenstellen-Datei",
-            type=["xlsx", "xls", "xlsm", "csv"],
-            help="Benötigte Felder: sap_von, sap_bis, tourengruppe, leiter",
-        )
+    # ── Uploads ──
+    col_left, col_right = st.columns(2, gap="medium")
+    with col_left:
+        kunden_file = st.file_uploader("Kundenliste", type=["xlsx", "xls", "xlsm", "csv"],
+                                        help="Spalten: A, I, J, K, L, M, N")
+        sap_file = st.file_uploader("SAP-Datei", type=["xlsx", "xls", "xlsm", "csv"],
+                                     help="Spalten: A, G, H, I, O, Y")
+        transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
+                                          help="Spalten: A, C")
+    with col_right:
+        kisoft_file = st.file_uploader("Kisoft-Datei", type=["csv", "xlsx", "xls", "xlsm"],
+                                        help="SAP Rahmentour, CSB Tournummer, Verladetor")
+        kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
+                                              help="A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter")
+        logo_file = st.file_uploader("Logo (optional)", type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
+                                      help="Oben rechts auf jedem Sendeplan")
 
-        st.divider()
-        logo_file = st.file_uploader(
-            "Logo (optional)",
-            type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
-            help="Wird oben rechts auf jedem Sendeplan angezeigt (PNG/JPG empfohlen)",
-        )
+    upload_map = {
+        "kunden": kunden_file, "sap": sap_file, "transport": transport_file,
+        "kisoft": kisoft_file, "kostenstellen": kostenstellen_file,
+    }
 
-        upload_map = {
-            "kunden": kunden_file,
-            "sap": sap_file,
-            "transport": transport_file,
-            "kisoft": kisoft_file,
-            "kostenstellen": kostenstellen_file,
-        }
+    # ── Status-Zeile ──
+    uploaded = sum(1 for v in upload_map.values() if v is not None)
+    file_names = [f'<span class="status-ok">✓ {html.escape(v.name)}</span>' if v else '<span class="status-miss">✗ fehlt</span>'
+                  for k, v in upload_map.items()]
+    labels = ["Kunden", "SAP", "Transport", "Kisoft", "Kostenstellen"]
+    status_parts = [f"{l}: {f}" for l, f in zip(labels, file_names)]
+    st.markdown(f"<p style='font-size:0.85rem;margin:0.5rem 0;'>{'&ensp;·&ensp;'.join(status_parts)}</p>", unsafe_allow_html=True)
 
     if not all_required_uploads_present(upload_map):
-        show_onboarding(upload_map)
+        st.info("Alle 5 Dateien hochladen, dann erscheint der Button.")
         return
 
+    # ── Daten verarbeiten ──
+    csv_separator = ";"
     try:
-        # Cache-Key aus Datei-Hashes – nur neu berechnen wenn Dateien sich ändern
         _cache_key = hashlib.md5(
             kunden_file.getvalue() + sap_file.getvalue() +
             transport_file.getvalue() + kisoft_file.getvalue() +
-            kostenstellen_file.getvalue() + (csv_separator or ";").encode()
+            kostenstellen_file.getvalue()
         ).hexdigest()
 
         if st.session_state.get("_df_cache_key") != _cache_key:
@@ -2543,205 +2438,63 @@ def main() -> None:
                 transport_file.getvalue(), transport_file.name,
                 kisoft_file.getvalue(), kisoft_file.name,
                 kostenstellen_file.getvalue(), kostenstellen_file.name,
-                csv_separator or ";",
+                csv_separator,
             )
             st.session_state["_df_cache_key"] = _cache_key
             st.session_state["_df_cache_result"] = _result
+            st.session_state["_export_ready"] = False  # alte HTML verwerfen
 
         (customers_df, plan_rows_df, counts,
          df_kisoft_debug, df_sap_debug) = st.session_state["_df_cache_result"]
     except Exception as exc:
-        st.error(f"Die hochgeladenen Dateien konnten nicht verarbeitet werden: {exc}")
-        render_panel("Hinweis", upload_status_lines(upload_map))
+        st.error(f"Fehler beim Verarbeiten: {exc}")
         return
 
-    # Debug-Report gecached in session_state (gleicher Cache-Key wie Daten)
+    # Debug-Reports cachen
     _data_key = st.session_state.get("_df_cache_key", "")
     if st.session_state.get("_debug_cache_key") != _data_key:
         st.session_state["_debug_reports"] = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
         st.session_state["_debug_cache_key"] = _data_key
     debug_reports = st.session_state["_debug_reports"]
 
-    with st.sidebar:
-        st.divider()
-        st.subheader("Filter")
-        st.text_input(
-            "Suche nach SAP, CSB oder Name",
-            key="search_text",
-            placeholder="zum Beispiel 211393 oder Kunde",
-        )
+    # ── Kurzinfo ──
+    cat_parts = [f"{k}: {v}" for k, v in counts.items() if k != "Alle"]
+    st.markdown(
+        f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen · {' · '.join(cat_parts)}"
+    )
 
-        # Auto-Jump: nur wenn sich der Suchtext gerade geändert hat
-        _search = normalize_text(st.session_state.search_text).lower()
-        _prev_search = st.session_state.get("_prev_search_text", "")
-        _search_changed = _search != _prev_search
-        st.session_state["_prev_search_text"] = _search
+    # ── Logo vorbereiten ──
+    logo_b64 = ""
+    logo_mime = "image/png"
+    if logo_file is not None:
+        logo_b64 = base64.b64encode(logo_file.getvalue()).decode("utf-8")
+        ext = logo_file.name.rsplit(".", 1)[-1].lower()
+        logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                     "svg": "image/svg+xml", "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
 
-        if _search_changed:
-            if _search:
-                _all_matches = filter_customers(customers_df, "Alle", st.session_state.search_text)
-                if not _all_matches.empty:
-                    _first_kat = normalize_text(_all_matches.iloc[0].get("Kategorie", "Alle"))
-                    if _first_kat in KATEGORIEN and _first_kat != "Alle":
-                        st.session_state.category_filter = _first_kat
-            elif st.session_state.get("_search_was_active"):
-                st.session_state.category_filter = "Alle"
-                st.session_state["_search_was_active"] = False
-        if _search:
-            st.session_state["_search_was_active"] = True
+    st.divider()
 
-        category = st.radio(
-            "Kategorie",
-            options=KATEGORIEN,
-            index=KATEGORIEN.index(st.session_state.category_filter) if st.session_state.category_filter in KATEGORIEN else 0,
-            horizontal=False,
-        )
-        st.session_state.category_filter = category
-
-        filtered_customers = filter_customers(customers_df, st.session_state.category_filter, st.session_state.search_text)
-        option_labels = build_option_labels(filtered_customers)
-        options = filtered_customers["SAP_Nr"].tolist()
-
-        if options:
-            if st.session_state.selected_sap not in options:
-                st.session_state.selected_sap = options[0]
-
-            selected_sap = st.selectbox(
-                "Kunde auswählen",
-                options=options,
-                format_func=lambda sap: option_labels.get(sap, sap),
-                index=options.index(st.session_state.selected_sap) if st.session_state.selected_sap in options else 0,
+    # ── Der eine Button ──
+    if st.button("⚡ Plan generieren", use_container_width=True, type="primary"):
+        with st.spinner(f"Generiere HTML für {len(customers_df)} Kunden …"):
+            bulk_html = build_full_document_html(
+                customers_df, plan_rows_df,
+                logo_b64=logo_b64, logo_mime=logo_mime,
+                debug_data=debug_reports,
             )
-            st.session_state.selected_sap = selected_sap
-        else:
-            st.session_state.selected_sap = ""
+        st.session_state["_export_html"] = bulk_html
+        st.session_state["_export_ready"] = True
 
-    # filtered_customers aus dem Sidebar-Scope ist hier weiter gültig
-    overview_tab, preview_tab, export_tab, debug_tab = st.tabs(["Übersicht", "Kundenvorschau", "Export", "🔍 Debug"])
-
-    with overview_tab:
-        st.markdown(
-            """
-            <div class="hero-card">
-                <h3 style="margin:0;">Daten erfolgreich geladen</h3>
-                <p style="margin:0.5rem 0 0 0;">Nutze links die Suche und den Kategoriefilter. Rechts in den Tabs findest du Übersicht, Vorschau und HTML-Export.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+    # ── Download ──
+    if st.session_state.get("_export_ready"):
+        st.download_button(
+            label="⬇  sendeplan.html herunterladen",
+            data=st.session_state["_export_html"],
+            file_name="sendeplan.html",
+            mime="text/html",
+            use_container_width=True,
         )
-
-        metric_cols = st.columns(4)
-        metric_cols[0].metric("Kunden gesamt", len(customers_df))
-        metric_cols[1].metric("Planzeilen gesamt", len(plan_rows_df))
-        metric_cols[2].metric("Treffer im Filter", len(filtered_customers))
-        metric_cols[3].metric("Aktive Kategorie", st.session_state.category_filter)
-
-        left, right = st.columns([3, 2], gap="large")
-        with left:
-            st.subheader("Kunden nach Kategorie")
-            cat_df = pd.DataFrame(
-                {"Kategorie": list(counts.keys()), "Anzahl": list(counts.values())}
-            )
-            st.dataframe(cat_df, use_container_width=True, hide_index=True)
-
-            st.subheader("Erste Treffer im aktuellen Filter")
-            preview_customers = filtered_customers[["SAP_Nr", "CSB_Nr", "Name", "Ort", "Kategorie"]].head(15)
-            st.dataframe(preview_customers, use_container_width=True, hide_index=True)
-
-        with right:
-            render_panel(
-                "Aktive Dateien",
-                upload_status_lines(upload_map),
-            )
-            render_panel(
-                "Verarbeitungsregeln",
-                """
-                <ul style="margin:0; padding-left:1.1rem; line-height:1.7;">
-                    <li>Starres Spalten-Mapping ohne automatische Erkennung</li>
-                    <li>Kisoft-Mapping über <strong>00 + erste 8 Stellen</strong> aus Rahmentour</li>
-                    <li>Dubletten in SAP werden nach SAP, Bestelltag und Liefertyp entfernt</li>
-                    <li>HTML-Export ist eigenständig und im Browser suchbar</li>
-                </ul>
-                """,
-            )
-
-    with preview_tab:
-        if filtered_customers.empty or not st.session_state.selected_sap:
-            st.warning("Im aktuellen Filter wurde kein Kunde gefunden.")
-        else:
-            selected_customer = filtered_customers[filtered_customers["SAP_Nr"] == st.session_state.selected_sap].iloc[0]
-            customer_rows = plan_rows_df[plan_rows_df["SAP_Nr"] == st.session_state.selected_sap].copy()
-            show_customer_preview(selected_customer, customer_rows)
-
-    with export_tab:
-        st.subheader("HTML-Export")
-        st.write(
-            "Die exportierte HTML-Datei enthält alle Daten direkt im Code. Sie kann ohne Streamlit geöffnet, durchsucht und gedruckt werden."
-        )
-
-        if filtered_customers.empty:
-            st.warning("Es gibt im aktuellen Filter keine Daten für einen HTML-Export.")
-        else:
-            logo_b64 = ""
-            logo_mime = "image/png"
-            if logo_file is not None:
-                raw = logo_file.getvalue()
-                logo_b64 = base64.b64encode(raw).decode("utf-8")
-                ext = logo_file.name.rsplit(".", 1)[-1].lower()
-                logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
-                             "png": "image/png", "svg": "image/svg+xml",
-                             "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
-
-            # ── Lazy HTML-Generierung: nur auf Knopfdruck, gecached in session_state ──
-            _export_hash = hashlib.md5(
-                (st.session_state.category_filter + st.session_state.search_text +
-                 st.session_state.get("_df_cache_key", "")).encode()
-            ).hexdigest()
-
-            if st.button("📄 Gesamtplan generieren", use_container_width=True,
-                         help="Erzeugt die HTML-Datei für alle gefilterten Kunden"):
-                with st.spinner(f"Generiere HTML für {len(filtered_customers)} Kunden …"):
-                    bulk_html = build_full_document_html(filtered_customers, plan_rows_df,
-                                    logo_b64=logo_b64, logo_mime=logo_mime,
-                                    debug_data=debug_reports)
-                st.session_state["_export_html"] = bulk_html
-                st.session_state["_export_hash"] = _export_hash
-
-            filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
-
-            col1, col2 = st.columns(2)
-            with col1:
-                if (st.session_state.get("_export_hash") == _export_hash
-                        and st.session_state.get("_export_html")):
-                    st.download_button(
-                        label="⬇ Gefilterten Gesamtplan herunterladen",
-                        data=st.session_state["_export_html"],
-                        file_name=f"sendeplan_{filename_suffix}.html",
-                        mime="text/html",
-                        use_container_width=True,
-                    )
-                else:
-                    st.caption("Zuerst oben den Gesamtplan generieren.")
-
-            with col2:
-                if st.session_state.selected_sap:
-                    selected_customer = filtered_customers[filtered_customers["SAP_Nr"] == st.session_state.selected_sap].iloc[0]
-                    customer_rows = plan_rows_df[plan_rows_df["SAP_Nr"] == st.session_state.selected_sap].copy()
-                    single_html = build_single_document_html(selected_customer, customer_rows, logo_b64=logo_b64, logo_mime=logo_mime)
-                    st.download_button(
-                        label="⬇ Aktuellen Kunden herunterladen",
-                        data=single_html,
-                        file_name=f"sendeplan_{normalize_text(selected_customer['SAP_Nr'])}.html",
-                        mime="text/html",
-                        use_container_width=True,
-                    )
-
-            st.info("Nach dem Download die HTML-Datei im Browser öffnen. Dort kannst du direkt nach SAP- oder CSB-Nummer suchen und anschließend drucken.")
-
-    with debug_tab:
-        st.subheader("SAP ↔ Kisoft Qualitätsprüfung")
-        st.write("Überprüft ob alle Rahmentouren in Kisoft gepflegt sind und ob Liefertage konsistent sind.")
-        render_debug_tab(debug_reports)
+        st.caption("HTML im Browser öffnen → Suche, Filter, Druck alles drin.")
 
 
 if __name__ == "__main__":
