@@ -207,8 +207,16 @@ def cleanup_dataframe(df: pd.DataFrame, key_column: str) -> pd.DataFrame:
             "sap_von",
             "sap von",
             "csb tournummer",
+            "kundennummer",
+            "kundennummer / markt",
+            "kunden-nr",
+            "kunden nr",
         }
-        if first_key in header_like_tokens:
+        # Auch Teilstring-Match: wenn der erste Schlüssel mit einem Token beginnt
+        is_header = first_key in header_like_tokens or any(
+            first_key.startswith(t) for t in header_like_tokens if len(t) > 3
+        )
+        if is_header:
             result = result.iloc[1:].copy()
 
     return result.reset_index(drop=True)
@@ -583,7 +591,7 @@ def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataF
     return result
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=3)
 def prepare_dataframes(
     kunden_bytes: bytes,
     kunden_name: str,
