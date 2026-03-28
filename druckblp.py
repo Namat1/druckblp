@@ -1035,11 +1035,9 @@ def render_panel(title: str, body: str) -> None:
 def export_css() -> str:
     return """
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
-
         :root {
-            --ink:        #0f1923;
-            --ink-soft:   #3d4f60;
+            --ink:        #111;
+            --ink-soft:   #444;
             --ink-muted:  #7a8fa0;
             --bg-main:    #111b25;
             --bg-card:    #18273a;
@@ -1047,7 +1045,7 @@ def export_css() -> str:
             --accent:     #f0a500;
             --accent-dim: #7a5200;
             --accent-soft:#fff3d0;
-            --red:        #d63030;
+            --red:        #c00;
             --green:      #1a9e52;
             --border:     rgba(255,255,255,0.07);
             --paper-bg:   #ffffff;
@@ -1057,10 +1055,7 @@ def export_css() -> str:
 
         body {
             background: var(--bg-main);
-            background-image:
-                radial-gradient(circle, rgba(255,255,255,0.035) 1px, transparent 1px);
-            background-size: 22px 22px;
-            font-family: 'DM Sans', 'Segoe UI', system-ui, sans-serif;
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
             font-size: 10pt;
             color: var(--ink);
             display: flex;
@@ -1174,7 +1169,7 @@ def export_css() -> str:
         }
         .filter-btn .filter-count {
             font-size: 10px;
-            font-family: 'DM Mono', monospace;
+            font-family: 'Courier New', monospace;
             font-weight: 500;
             background: rgba(0,0,0,0.15);
             padding: 1px 6px;
@@ -1213,7 +1208,7 @@ def export_css() -> str:
         }
         .search-count {
             font-size: 11px;
-            font-family: 'DM Mono', monospace;
+            font-family: 'Courier New', monospace;
             color: var(--ink-muted);
             flex: 1;
         }
@@ -1271,24 +1266,15 @@ def export_css() -> str:
             background: var(--paper-bg);
             box-shadow:
                 0 2px 4px rgba(0,0,0,0.12),
-                0 8px 32px rgba(0,0,0,0.28),
-                0 0 0 1px rgba(255,255,255,0.04);
+                0 8px 32px rgba(0,0,0,0.28);
             padding: 0;
             position: relative;
             border-radius: 3px;
         }
-        /* Farbiger Akzentstreifen oben */
-        .paper::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; right: 0;
-            height: 3.5px;
-            background: linear-gradient(90deg, #003366 0%, #005bac 40%, #f0a500 100%);
-            z-index: 1;
-        }
+        .paper::before { display: none; }
         .paper-inner {
             width: 210mm;
-            padding: 13mm 13mm 12mm 13mm;
+            padding: 14mm 15mm 12mm 15mm;
             box-sizing: border-box;
             transform-origin: top left;
             zoom: 1;
@@ -1302,14 +1288,14 @@ def export_css() -> str:
             grid-template-columns: 52mm 1fr 44mm;
             gap: 3mm;
             align-items: flex-start;
-            margin-bottom: 3.5mm;
-            padding-bottom: 3mm;
-            border-bottom: 0.4mm solid #e8edf2;
+            margin-bottom: 4mm;
+            padding-bottom: 0;
+            border-bottom: none;
         }
         .doc-address {
-            font-size: 8.5pt;
-            line-height: 1.55;
-            color: #444;
+            font-size: 9pt;
+            line-height: 1.5;
+            color: #333;
         }
         .doc-address strong {
             font-size: 9.5pt;
@@ -1318,31 +1304,29 @@ def export_css() -> str:
             margin-bottom: 0.5mm;
             color: #111;
         }
-        .doc-title-block { text-align: center; padding: 0 4mm; }
+        .doc-title-block { text-align: center; padding: 0 2mm; }
         .doc-title {
-            font-size: 17pt;
+            font-size: 16pt;
             font-weight: 700;
-            letter-spacing: -0.02em;
-            line-height: 1.1;
+            line-height: 1.15;
             margin-bottom: 1.5mm;
-            color: #0d2035;
+            color: #111;
         }
         .doc-subtitle {
             font-size: 11pt;
             font-weight: 700;
-            color: var(--red);
+            color: #c00;
             margin-bottom: 1mm;
             cursor: text;
-            border-radius: 4px;
-            padding: 1px 5px;
+            border-radius: 3px;
+            padding: 1px 4px;
             outline: none;
-            transition: background 0.15s;
             display: inline-block;
         }
-        .doc-subtitle:hover { background: rgba(214,48,48,0.06); }
+        .doc-subtitle:hover { background: rgba(200,0,0,0.06); }
         .doc-subtitle:focus {
-            background: rgba(214,48,48,0.1);
-            box-shadow: 0 0 0 2px rgba(214,48,48,0.2);
+            background: rgba(200,0,0,0.08);
+            box-shadow: 0 0 0 2px rgba(200,0,0,0.15);
         }
         @media print {
             .doc-subtitle:hover, .doc-subtitle:focus {
@@ -1356,13 +1340,12 @@ def export_css() -> str:
            INFOLEISTE
         ══════════════════════════════════════ */
         .doc-infobar {
-            font-size: 8.5pt;
+            font-size: 9pt;
             margin: 3mm 0 3.5mm;
-            padding: 2mm 3mm;
-            background: #f4f7fa;
-            border-radius: 3px;
-            border-left: 2.5px solid #003366;
-            color: #444;
+            padding: 0;
+            background: none;
+            border: none;
+            color: #333;
             display: flex;
             gap: 6mm;
         }
@@ -1374,26 +1357,23 @@ def export_css() -> str:
         .tour-overview {
             width: 100%;
             border-collapse: collapse;
-            font-size: 8.5pt;
+            font-size: 9pt;
             margin-bottom: 3.5mm;
-            border-radius: 3px;
-            overflow: hidden;
         }
         .tour-overview td {
-            border: 0.3mm solid #dde3ea;
-            padding: 1.2mm 2.5mm;
+            border: 0.3mm solid #999;
+            padding: 1.5mm 3mm;
             white-space: nowrap;
         }
         .tour-overview tr:first-child td {
             font-weight: 700;
-            background: #003366;
-            color: #fff;
-            border-color: #003366;
+            background: none;
+            color: #111;
+            border-color: #999;
         }
         .tour-overview tr:last-child td {
-            background: #f4f7fa;
-            font-family: 'DM Mono', 'Courier New', monospace;
-            font-size: 8pt;
+            background: none;
+            font-size: 9pt;
         }
         .tour-overview td:first-child {
             font-weight: 700;
@@ -1406,39 +1386,36 @@ def export_css() -> str:
         .plan-table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 8.5pt;
-            border: 0.3mm solid #c8d4df;
+            font-size: 9pt;
+            border: 0.3mm solid #999;
         }
         .plan-table thead th {
-            border: 0.3mm solid #c8d4df;
-            padding: 2mm 2.5mm;
+            border: 0.3mm solid #999;
+            padding: 2mm 3mm;
             text-align: left;
             font-weight: 700;
-            background: #0d2035;
-            color: #fff;
-            font-size: 8.5pt;
-            letter-spacing: 0.02em;
+            background: none;
+            color: #111;
+            font-size: 9pt;
         }
-        .plan-table tbody tr:nth-child(even) td { background: #f7f9fb; }
         .plan-table tbody td {
-            border: 0.3mm solid #dde3ea;
-            padding: 1.5mm 2.5mm;
+            border: 0.3mm solid #bbb;
+            padding: 1.5mm 3mm;
             vertical-align: top;
         }
-        .plan-table tr.day-start td { border-top: 0.5mm solid #7a9ab5; }
+        .plan-table tr.day-start td { border-top: 0.5mm solid #666; }
         .plan-table td.liefertag-cell {
             font-weight: 700;
             width: 22mm;
             white-space: nowrap;
             vertical-align: top;
-            color: #003366;
+            color: #111;
+            text-decoration: underline;
         }
         .plan-table td.bestelltag-cell { width: 24mm; white-space: nowrap; }
         .plan-table td.zeit-cell {
             width: 26mm;
             white-space: nowrap;
-            font-family: 'DM Mono', 'Courier New', monospace;
-            font-size: 8pt;
         }
 
         /* ══════════════════════════════════════
@@ -1495,9 +1472,8 @@ def export_css() -> str:
                 box-shadow: none !important; border-radius: 0 !important;
                 page-break-inside: avoid; contain: layout style;
             }
-            .paper::before { border-radius: 0; }
             .paper-inner {
-                width: 210mm !important; padding: 10mm 12mm !important;
+                width: 210mm !important; padding: 10mm 13mm !important;
                 box-sizing: border-box !important; transform: none !important;
             }
             .doc-subtitle:hover, .doc-subtitle:focus { background: none; box-shadow: none; }
@@ -2249,7 +2225,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             width:720px; max-width:92vw;
             background:#111b25; border-left:1px solid rgba(255,255,255,0.1);
             z-index:200; overflow-y:auto; padding:20px;
-            font-family:'DM Sans',sans-serif;
+            font-family:'Segoe UI',system-ui,sans-serif;
             box-shadow:-8px 0 32px rgba(0,0,0,0.5);
         }}
         .debug-panel.open {{ display:block; }}
@@ -2276,7 +2252,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         }}
         .dbg-title:hover {{ background:rgba(255,255,255,0.09); }}
         .dbg-count {{
-            font-family:'DM Mono',monospace;
+            font-family:'Courier New',monospace;
             background:rgba(255,255,255,0.1);
             padding:2px 8px; border-radius:20px; font-size:11px;
         }}
