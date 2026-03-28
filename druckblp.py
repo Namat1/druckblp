@@ -2332,6 +2332,9 @@ def main() -> None:
     with st.sidebar:
         st.title("Sendeplan")
         st.caption("Uploads, Filter und Export")
+        if st.button("🗑️ Cache leeren", help="Erzwingt Neuberechnung aller Daten"):
+            st.cache_data.clear()
+            st.rerun()
         csv_separator = st.text_input("CSV-Trennzeichen", value=";", max_chars=1, key="csv_separator")
 
         kunden_file = st.file_uploader(
