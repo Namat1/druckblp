@@ -626,18 +626,13 @@ def prepare_dataframes(
     ).copy()
 
     def infer_liefertag(row: pd.Series) -> str:
-        # 1. Spalte G aus SAP = direkter Liefertag (1=Mo … 6=Sa)
+        # Liefertag ausschließlich aus SAP Spalte G (immer befüllt, 1=Mo … 6=Sa)
         liefertag_raw = normalize_digits(row.get("Liefertag_Raw", ""))
         if liefertag_raw and liefertag_raw[0].isdigit():
             day = int(liefertag_raw[0])
             if day in WOCHENTAGE:
                 return WOCHENTAGE[day]
-        # 2. Fallback: Wochentag aus Kisoft
-        wochentag = normalize_text(row.get("Wochentag", ""))
-        if wochentag and wochentag.lower() not in ("", "nan"):
-            return wochentag.capitalize()
-        # 3. Letzter Fallback: Bestelltag aus SAP (Spalte H)
-        return row.get("Bestelltag_Name", "Unbekannt")
+        return "Unbekannt"
 
     kunden_basis = df_kunden.merge(
         df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates(subset=["SAP_Nr"]),
@@ -1742,13 +1737,50 @@ def render_export_search_toolbar() -> str:
         </div>
 
         <button type="button" class="sidebar-print-btn" onclick="printCurrent()">&#128438; Drucken</button>
+        <button type="button" class="sidebar-debug-btn" onclick="toggleDebug()">&#128269; Debug</button>
     </aside>
     """
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png") -> str:
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None) -> str:
     # Kein dynamischer Logo-Load – src direkt im img-Tag, Browser cached automatisch
     logo_head_script = ""
+
+    # Debug-HTML aus debug_data aufbauen
+    def _build_debug_html(data: Optional[Dict[str, pd.DataFrame]]) -> str:
+        if not data:
+            return ""
+        sections = []
+        for title, df in data.items():
+            count = len(df)
+            icon = "✅" if count == 0 else "⚠️"
+            if df.empty:
+                rows_html = "<tr><td colspan='99' style='color:#888;padding:8px'>Keine Einträge</td></tr>"
+                thead_html = ""
+            else:
+                cols = list(df.columns)
+                thead_html = "<thead><tr>" + "".join(f"<th>{html.escape(c)}</th>" for c in cols) + "</tr></thead>"
+                rows_html = ""
+                for _, row in df.iterrows():
+                    rows_html += "<tr>" + "".join(
+                        f"<td>{html.escape(str(row[c]))}</td>" for c in cols
+                    ) + "</tr>"
+            sections.append(f"""
+            <div class="dbg-section">
+                <div class="dbg-title" onclick="this.parentElement.classList.toggle('open')">
+                    <span>{icon} {html.escape(title)}</span>
+                    <span class="dbg-count">{count}</span>
+                </div>
+                <div class="dbg-body">
+                    <table class="dbg-table">
+                        {thead_html}
+                        <tbody>{rows_html}</tbody>
+                    </table>
+                </div>
+            </div>""")
+        return "".join(sections)
+
+    debug_html = _build_debug_html(debug_data)
     docs: List[str] = []
 
     entry_count = 0
@@ -2052,6 +2084,70 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>Sendeplan-Export</title>
         {export_css()}
+        <style>
+        .sidebar-debug-btn {{
+            display:block; width:calc(100% - 28px); margin:0 14px 10px;
+            border:1px solid rgba(255,255,255,0.12); border-radius:10px;
+            padding:9px; font-size:12px; font-weight:600; font-family:inherit;
+            cursor:pointer; background:rgba(255,255,255,0.06); color:#aac;
+            text-align:center; transition:all 0.15s;
+        }}
+        .sidebar-debug-btn:hover {{ background:rgba(255,255,255,0.12); color:#fff; }}
+        @media print {{ .sidebar-debug-btn,.debug-panel {{ display:none !important; }} }}
+        .debug-panel {{
+            display:none; position:fixed; top:0; right:0; bottom:0;
+            width:720px; max-width:92vw;
+            background:#111b25; border-left:1px solid rgba(255,255,255,0.1);
+            z-index:200; overflow-y:auto; padding:20px;
+            font-family:'DM Sans',sans-serif;
+            box-shadow:-8px 0 32px rgba(0,0,0,0.5);
+        }}
+        .debug-panel.open {{ display:block; }}
+        .debug-panel-header {{
+            display:flex; align-items:center; justify-content:space-between;
+            margin-bottom:16px; padding-bottom:12px;
+            border-bottom:1px solid rgba(255,255,255,0.1);
+        }}
+        .debug-panel-title {{ font-size:15px; font-weight:700; color:#fff; }}
+        .debug-close {{
+            background:none; border:none; color:#aaa; font-size:20px;
+            cursor:pointer; padding:4px 8px; border-radius:6px;
+        }}
+        .debug-close:hover {{ background:rgba(255,255,255,0.1); color:#fff; }}
+        .dbg-section {{
+            margin-bottom:8px; border:1px solid rgba(255,255,255,0.08);
+            border-radius:8px; overflow:hidden;
+        }}
+        .dbg-title {{
+            display:flex; justify-content:space-between; align-items:center;
+            padding:10px 14px; background:rgba(255,255,255,0.05);
+            cursor:pointer; font-size:12px; font-weight:600; color:#ccc;
+            user-select:none;
+        }}
+        .dbg-title:hover {{ background:rgba(255,255,255,0.09); }}
+        .dbg-count {{
+            font-family:'DM Mono',monospace;
+            background:rgba(255,255,255,0.1);
+            padding:2px 8px; border-radius:20px; font-size:11px;
+        }}
+        .dbg-body {{ display:none; overflow-x:auto; }}
+        .dbg-section.open .dbg-body {{ display:block; }}
+        .dbg-table {{
+            width:100%; border-collapse:collapse; font-size:11px; color:#ccc;
+        }}
+        .dbg-table thead th {{
+            background:#0d2035; color:#fff; padding:6px 8px; text-align:left;
+            font-size:10px; letter-spacing:0.05em;
+            border-bottom:1px solid rgba(255,255,255,0.1);
+        }}
+        .dbg-table tbody td {{
+            padding:5px 8px; border-bottom:1px solid rgba(255,255,255,0.05);
+        }}
+        .dbg-table tbody tr:hover td {{ background:rgba(255,255,255,0.04); }}
+        </style>
+        <script>
+        function toggleDebug() {{ document.getElementById('debug-panel').classList.toggle('open'); }}
+        </script>
     </head>
     <body>
         {render_export_search_toolbar()}
@@ -2059,6 +2155,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         <div class="page-stack">
         {''.join(docs)}
         </div>
+        </div>
+        <div class="debug-panel" id="debug-panel">
+            <div class="debug-panel-header">
+                <div class="debug-panel-title">&#128269; SAP &harr; Kisoft Debug</div>
+                <button class="debug-close" onclick="toggleDebug()">&#10005;</button>
+            </div>
+            {debug_html if debug_html else '<p style="color:#666;font-size:12px">Keine Debug-Daten vorhanden.</p>'}
         </div>
         {search_script}
     </body>
@@ -2397,8 +2500,10 @@ def main() -> None:
                 logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
                              "png": "image/png", "svg": "image/svg+xml",
                              "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
+            _debug_reports = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
             bulk_html = build_full_document_html(filtered_customers, plan_rows_df,
-                            logo_b64=logo_b64, logo_mime=logo_mime)
+                            logo_b64=logo_b64, logo_mime=logo_mime,
+                            debug_data=_debug_reports)
             filename_suffix = normalize_text(st.session_state.category_filter).lower() or "alle"
 
             col1, col2 = st.columns(2)
