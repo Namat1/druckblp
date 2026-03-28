@@ -611,34 +611,18 @@ def prepare_dataframes(
 
     df_sap = df_sap.merge(df_transport, on="Liefertyp_ID", how="left")
 
-    # Kisoft-Merge: SAP Rahmentour + Bestelltag gegen CSB-Tourstartzahl matchen.
-    # Kisoft hat pro Rahmentour mehrere Einträge (eine pro Wochentag-Variante).
-    # Die SAP-Spalte "Bestelltag" (1=Mo, 2=Di, ..., 6=Sa) gibt den Liefertag –
-    # die passende Kisoft-Zeile hat genau diese Ziffer als Startzahl der CSB Tournummer.
-    df_kisoft_work = df_kisoft.copy()
-    df_kisoft_work["_csb_day"] = df_kisoft_work["CSB Tournummer"].apply(
-        lambda v: int(normalize_digits(normalize_text(v))[0])
-        if normalize_digits(normalize_text(v)) and normalize_digits(normalize_text(v))[0].isdigit()
-        else 0
-    )
-
+    # Kisoft ist 1:1 pro SAP Rahmentour – einfacher Merge, keine Dedup nötig.
     df_sap = df_sap.merge(
-        df_kisoft_work[["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor", "_csb_day"]],
+        df_kisoft[["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor"]],
         left_on="Kisoft_Key",
         right_on="SAP Rahmentour",
         how="left",
     )
 
-    # Nur den Kisoft-Eintrag behalten, dessen CSB-Starttag mit SAP-Bestelltag übereinstimmt.
-    # Bei keinem Match (left join → kein Kisoft-Eintrag): Zeile trotzdem behalten.
-    bestelltag_num = pd.to_numeric(df_sap["Bestelltag"], errors="coerce").fillna(0).astype(int)
-    matched    = df_sap["_csb_day"].notna() & (df_sap["_csb_day"] == bestelltag_num)
-    unmatched  = df_sap["_csb_day"].isna() | (df_sap["_csb_day"] == 0)
-    df_sap = df_sap[matched | unmatched].copy()
-    df_sap = df_sap.drop(columns=["_csb_day"], errors="ignore")
-
-    # Restliche echte Duplikate entfernen (gleiche SAP + Bestelltag + Transportgruppe).
-    df_sap = df_sap.drop_duplicates(subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID"], keep="first").copy()
+    # Echte Duplikate aus SAP entfernen: gleiche SAP + Bestelltag + Sortiment + Rahmentour.
+    df_sap = df_sap.drop_duplicates(
+        subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID", "Rahmentour_Raw"], keep="first"
+    ).copy()
 
     def infer_liefertag(row: pd.Series) -> str:
         # 1. Erste Ziffer der CSB-Tournummer = Liefertag (1=Mo, 2=Di, …)
