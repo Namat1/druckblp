@@ -222,7 +222,6 @@ def cleanup_dataframe(df: pd.DataFrame, key_column: str) -> pd.DataFrame:
     return result.reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False)
 def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str, dataset_key: str) -> pd.DataFrame:
     config = UPLOAD_CONFIG[dataset_key]
     raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
@@ -232,7 +231,6 @@ def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str,
     return structured_df
 
 
-@st.cache_data(show_spinner=False)
 def load_kisoft_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
     """Liest die Kisoft-Datei.
 
@@ -306,7 +304,6 @@ def _parse_sap_range_col(value) -> tuple:
     return ("", "")
 
 
-@st.cache_data(show_spinner=False)
 def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
     """Liest den Kostenstellenplan.
 
@@ -419,7 +416,6 @@ def _parse_kst_tag(val) -> str:
     return _TAG_ABK.get(key, str(val).strip())
 
 
-@st.cache_data(show_spinner=False)
 def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
     """Extrahiert den Bestellplan fuer Zusatz-Sortimente (AVO, Werbemittel, …)
     aus dem Kostenstellenplan CSB Standard.
