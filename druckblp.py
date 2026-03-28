@@ -47,15 +47,16 @@ UPLOAD_CONFIG = {
     },
     "sap": {
         "label": "SAP-Datei hochladen",
-        "help": "Verwendet feste Excel-Spalten: A, H, I, O, Y",
+        "help": "Verwendet feste Excel-Spalten: A, G, H, I, O, Y",
         "mapping": {
             "SAP_Nr": "A",
+            "Liefertag_Raw": "G",
             "Bestelltag": "H",
             "Bestellzeitende": "I",
             "Liefertyp_ID": "O",
             "Rahmentour_Raw": "Y",
         },
-        "required": ["SAP_Nr", "Bestelltag", "Bestellzeitende", "Liefertyp_ID", "Rahmentour_Raw"],
+        "required": ["SAP_Nr", "Liefertag_Raw", "Bestelltag", "Bestellzeitende", "Liefertyp_ID", "Rahmentour_Raw"],
         "key": "SAP_Nr",
     },
     "transport": {
@@ -625,14 +626,13 @@ def prepare_dataframes(
     ).copy()
 
     def infer_liefertag(row: pd.Series) -> str:
-        # 1. Erste Ziffer der CSB-Tournummer = Liefertag (1=Mo, 2=Di, …)
-        #    Hat immer Vorrang – auch wenn Kisoft einen abweichenden Wochentag liefert.
-        csb_tour = normalize_digits(row.get("CSB Tournummer", ""))
-        if csb_tour and csb_tour[0].isdigit():
-            day = int(csb_tour[0])
+        # 1. Spalte G aus SAP = direkte Liefertag-Nummer (1=Mo, 2=Di, …)
+        liefertag_raw = normalize_digits(row.get("Liefertag_Raw", ""))
+        if liefertag_raw and liefertag_raw[0].isdigit():
+            day = int(liefertag_raw[0])
             if day in WOCHENTAGE:
                 return WOCHENTAGE[day]
-        # 2. Fallback: Wochentag aus Kisoft (wenn keine gültige CSB-Startzahl)
+        # 2. Fallback: Wochentag aus Kisoft
         wochentag = normalize_text(row.get("Wochentag", ""))
         if wochentag and wochentag.lower() not in ("", "nan"):
             return wochentag.capitalize()
