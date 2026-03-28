@@ -626,18 +626,13 @@ def prepare_dataframes(
     ).copy()
 
     def infer_liefertag(row: pd.Series) -> str:
-        # 1. Spalte G aus SAP = direkte Liefertag-Nummer (1=Mo, 2=Di, …)
+        # Liefertag direkt aus SAP Spalte G (1=Mo, 2=Di, … 6=Sa)
         liefertag_raw = normalize_digits(row.get("Liefertag_Raw", ""))
         if liefertag_raw and liefertag_raw[0].isdigit():
             day = int(liefertag_raw[0])
             if day in WOCHENTAGE:
                 return WOCHENTAGE[day]
-        # 2. Fallback: Wochentag aus Kisoft
-        wochentag = normalize_text(row.get("Wochentag", ""))
-        if wochentag and wochentag.lower() not in ("", "nan"):
-            return wochentag.capitalize()
-        # 3. Letzter Fallback: Bestelltag aus SAP
-        return row.get("Bestelltag_Name", "Unbekannt")
+        return "Unbekannt"
 
     kunden_basis = df_kunden.merge(
         df_sap[["SAP_Nr", "Rahmentour_Raw"]].drop_duplicates(subset=["SAP_Nr"]),
