@@ -2332,9 +2332,16 @@ def main() -> None:
     with st.sidebar:
         st.title("Sendeplan")
         st.caption("Uploads, Filter und Export")
-        if st.button("🗑️ Cache leeren", help="Erzwingt Neuberechnung aller Daten"):
-            st.cache_data.clear()
-            st.rerun()
+        col_a, col_b = st.columns(2)
+        with col_a:
+            if st.button("🗑️ Cache leeren", use_container_width=True, help="Erzwingt Neuberechnung aller Daten"):
+                st.cache_data.clear()
+                st.rerun()
+        with col_b:
+            if st.button("🔄 App neu starten", use_container_width=True, help="Startet die App komplett neu"):
+                st.cache_data.clear()
+                st.cache_resource.clear()
+                st.rerun()
         csv_separator = st.text_input("CSV-Trennzeichen", value=";", max_chars=1, key="csv_separator")
 
         kunden_file = st.file_uploader(
@@ -2381,6 +2388,19 @@ def main() -> None:
     if not all_required_uploads_present(upload_map):
         show_onboarding(upload_map)
         return
+
+    # ── SAP-Rohdaten direkt prüfen (vor prepare_dataframes) ──
+    if sap_file is not None:
+        with st.sidebar.expander("🔎 SAP-Rohcheck", expanded=False):
+            try:
+                import io as _io
+                import pandas as _pd
+                _raw = _pd.read_excel(_io.BytesIO(sap_file.getvalue()), header=None, dtype=str)
+                st.write(f"Zeilen: {len(_raw)}, Spalten: {_raw.shape[1]}")
+                st.write("Spalte A (erste 5):", _raw.iloc[:5, 0].tolist())
+                st.write("Spalte G (erste 5):", _raw.iloc[:5, 6].tolist() if _raw.shape[1] > 6 else "fehlt")
+            except Exception as _e:
+                st.error(f"Fehler: {_e}")
 
     try:
         customers_df, plan_rows_df, counts, df_kisoft_debug, df_sap_debug = prepare_dataframes(
