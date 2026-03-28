@@ -1848,13 +1848,30 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     rows_html += "<tr>" + "".join(
                         f"<td>{html.escape(str(row[c]))}</td>" for c in cols
                     ) + "</tr>"
-            # CSV als data-URI für Download-Button
+            # CSV als data-URI – Tour-Spalten zu einem Feld zusammenführen
             if not df.empty:
                 import base64 as _b64
-                _cols = list(df.columns)
-                _csv_lines = [";".join(_cols)]
-                for _, _row in df.iterrows():
-                    _csv_lines.append(";".join(str(_row[c]) for c in _cols))
+                _tour_cols = ["CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"]
+                _present_tour_cols = [c for c in _tour_cols if c in df.columns]
+                _other_cols = [c for c in df.columns if c not in _present_tour_cols]
+                if _present_tour_cols:
+                    # Tour-Spalten zusammenführen
+                    _df_exp = df[_other_cols].copy()
+                    _df_exp["Touren (CSB, SAP, Kisoft)"] = df[_present_tour_cols].apply(
+                        lambda row: ", ".join(
+                            f"{c}: {str(row[c])}" for c in _present_tour_cols
+                            if str(row[c]) not in ("", "nan")
+                        ), axis=1
+                    )
+                    _cols = list(_df_exp.columns)
+                    _csv_lines = [";".join(_cols)]
+                    for _, _row in _df_exp.iterrows():
+                        _csv_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
+                else:
+                    _cols = list(df.columns)
+                    _csv_lines = [";".join(_cols)]
+                    for _, _row in df.iterrows():
+                        _csv_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
                 _csv_bytes = "\n".join(_csv_lines).encode("utf-8-sig")
                 _csv_b64 = _b64.b64encode(_csv_bytes).decode()
                 _safe_title = title.replace("/", "-").replace(" ", "_")
@@ -1886,13 +1903,29 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         # Gesamt-Export aller nicht-leeren Reports
         import base64 as _b64
         _all_lines = []
+        _tour_cols_g = ["CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"]
         for _t, _df in data.items():
             if not _df.empty:
                 _all_lines.append(f"=== {_t} ===")
-                _cols = list(_df.columns)
-                _all_lines.append(";".join(_cols))
-                for _, _row in _df.iterrows():
-                    _all_lines.append(";".join(str(_row[c]) for c in _cols))
+                _pt = [c for c in _tour_cols_g if c in _df.columns]
+                _oc = [c for c in _df.columns if c not in _pt]
+                if _pt:
+                    _df_g = _df[_oc].copy()
+                    _df_g["Touren (CSB, SAP, Kisoft)"] = _df[_pt].apply(
+                        lambda row: ", ".join(
+                            f"{c}: {str(row[c])}" for c in _pt
+                            if str(row[c]) not in ("", "nan")
+                        ), axis=1
+                    )
+                    _cols = list(_df_g.columns)
+                    _all_lines.append(";".join(_cols))
+                    for _, _row in _df_g.iterrows():
+                        _all_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
+                else:
+                    _cols = list(_df.columns)
+                    _all_lines.append(";".join(_cols))
+                    for _, _row in _df.iterrows():
+                        _all_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
                 _all_lines.append("")
         if _all_lines:
             _all_bytes = "\n".join(_all_lines).encode("utf-8-sig")
