@@ -1441,12 +1441,21 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
         return ""
 
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
-    # Alle eindeutigen Touren pro Tag sammeln (Reihenfolge erhalten)
+    # Touren nach der ersten Ziffer der CSB Tournummer gruppieren (1=Mo … 6=Sa).
+    # Nicht nach Liefertag aus SAP – der kann bei Touren wie 6004 vom CSB-Tag abweichen.
     tour_by_day: dict = {}
     for _, row in customer_rows.iterrows():
-        day = normalize_text(row.get("Liefertag", ""))
         csb = normalize_text(row.get("CSB Tournummer", ""))
-        if not day or not csb:
+        if not csb:
+            continue
+        csb_digits = normalize_digits(csb)
+        if csb_digits and csb_digits[0].isdigit():
+            day_num = int(csb_digits[0])
+            day = WOCHENTAGE.get(day_num, "")
+        else:
+            # Fallback: Liefertag aus SAP
+            day = normalize_text(row.get("Liefertag", ""))
+        if not day:
             continue
         if day not in tour_by_day:
             tour_by_day[day] = []
