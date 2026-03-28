@@ -591,7 +591,6 @@ def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataF
     return result
 
 
-@st.cache_data(show_spinner=False)
 def prepare_dataframes(
     kunden_bytes: bytes,
     kunden_name: str,
@@ -604,7 +603,6 @@ def prepare_dataframes(
     kostenstellen_bytes: bytes,
     kostenstellen_name: str,
     csv_separator: str,
-    _version: str = "v4",  # Erhöhen um Cache zu invalidieren
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int], pd.DataFrame, pd.DataFrame]:
     df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
     df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
@@ -2403,20 +2401,28 @@ def main() -> None:
                 st.error(f"Fehler: {_e}")
 
     try:
-        customers_df, plan_rows_df, counts, df_kisoft_debug, df_sap_debug = prepare_dataframes(
-            kunden_file.getvalue(),
-            kunden_file.name,
-            sap_file.getvalue(),
-            sap_file.name,
-            transport_file.getvalue(),
-            transport_file.name,
-            kisoft_file.getvalue(),
-            kisoft_file.name,
-            kostenstellen_file.getvalue(),
-            kostenstellen_file.name,
-            csv_separator or ";",
-            _version="v4",
-        )
+        # Cache-Key aus Datei-Hashes – nur neu berechnen wenn Dateien sich ändern
+        import hashlib as _hashlib
+        _cache_key = _hashlib.md5(
+            kunden_file.getvalue() + sap_file.getvalue() +
+            transport_file.getvalue() + kisoft_file.getvalue() +
+            kostenstellen_file.getvalue() + (csv_separator or ";").encode()
+        ).hexdigest()
+
+        if st.session_state.get("_df_cache_key") != _cache_key:
+            _result = prepare_dataframes(
+                kunden_file.getvalue(), kunden_file.name,
+                sap_file.getvalue(), sap_file.name,
+                transport_file.getvalue(), transport_file.name,
+                kisoft_file.getvalue(), kisoft_file.name,
+                kostenstellen_file.getvalue(), kostenstellen_file.name,
+                csv_separator or ";",
+            )
+            st.session_state["_df_cache_key"] = _cache_key
+            st.session_state["_df_cache_result"] = _result
+
+        (customers_df, plan_rows_df, counts,
+         df_kisoft_debug, df_sap_debug) = st.session_state["_df_cache_result"]
     except Exception as exc:
         st.error(f"Die hochgeladenen Dateien konnten nicht verarbeitet werden: {exc}")
         render_panel("Hinweis", upload_status_lines(upload_map))
