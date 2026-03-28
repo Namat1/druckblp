@@ -831,11 +831,12 @@ def build_debug_report(
                 }
             ).reset_index()
             _multi = _multi.merge(_agg, on=["SAP_Nr", "Liefertag"], how="left")
-            if "Name" in plan_rows.columns:
-                _namen = plan_rows[["SAP_Nr", "Name"]].drop_duplicates("SAP_Nr")
-                _multi = _multi.merge(_namen, on="SAP_Nr", how="left")
+            addr_cols = [c for c in ["SAP_Nr", "Name", "Strasse", "PLZ", "Ort"] if c in plan_rows.columns]
+            if addr_cols:
+                _addr = plan_rows[addr_cols].drop_duplicates("SAP_Nr")
+                _multi = _multi.merge(_addr, on="SAP_Nr", how="left")
             _multi = _multi.sort_values(["SAP_Nr", "Liefertag"]).reset_index(drop=True)
-            cols_order = [c for c in ["SAP_Nr", "Name", "Liefertag", "Anzahl Touren", "CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"] if c in _multi.columns]
+            cols_order = [c for c in ["SAP_Nr", "Name", "Strasse", "PLZ", "Ort", "Liefertag", "Anzahl Touren", "CSB Touren", "SAP Rahmentour", "Kisoft Rahmentour"] if c in _multi.columns]
             reports["Mehrere Touren an einem Tag"] = _multi[cols_order]
         else:
             reports["Mehrere Touren an einem Tag"] = pd.DataFrame()
@@ -847,10 +848,29 @@ def build_debug_report(
 
 def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
     """Zeigt Debug-Reports im Streamlit-Tab."""
+    import io as _io
+
     total_issues = sum(len(df) for df in reports.values())
     if total_issues == 0:
         st.success("✅ Keine Auffälligkeiten gefunden – SAP und Kisoft sind konsistent.")
         return
+
+    # Gesamt-Export aller Reports als Excel (ein Sheet pro Report)
+    _buf = _io.BytesIO()
+    with pd.ExcelWriter(_buf, engine="openpyxl") as _writer:
+        for _title, _df in reports.items():
+            if not _df.empty:
+                _sheet = _title[:31]  # Excel-Sheetname max 31 Zeichen
+                _df.to_excel(_writer, sheet_name=_sheet, index=False)
+    _buf.seek(0)
+    st.download_button(
+        label="📥 Alle Debug-Daten als Excel herunterladen",
+        data=_buf.getvalue(),
+        file_name="sendeplan_debug.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
+    st.divider()
 
     for title, df in reports.items():
         count = len(df)
@@ -860,6 +880,18 @@ def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
                 st.success("Keine Einträge.")
             else:
                 st.dataframe(df, use_container_width=True, hide_index=True)
+                # Download für diesen Report
+                _buf2 = _io.BytesIO()
+                df.to_excel(_buf2, index=False, engine="openpyxl")
+                _buf2.seek(0)
+                _safe = title.replace("/", "-").replace(" ", "_")
+                st.download_button(
+                    label=f"📥 {title} exportieren",
+                    data=_buf2.getvalue(),
+                    file_name=f"debug_{_safe}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_{_safe}",
+                )
 
 
 # ============================================================
