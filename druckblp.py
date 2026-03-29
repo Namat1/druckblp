@@ -2001,16 +2001,16 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         .md-prio-u { color: #555; }
         @media print { .md-section, .md-overlay { display: none !important; } }
         .md-tour-banner {
-            text-align: center;
+            text-align: left;
             background: none;
-            color: #111;
-            padding: 4mm 0 2mm 0;
+            color: #ccc;
+            padding: 4mm 0 2mm 6mm;
             margin: -14mm -15mm 3mm -15mm;
             font-family: 'Courier New', monospace;
-            font-size: 18pt;
+            font-size: 11pt;
             font-weight: 900;
             letter-spacing: 0.1em;
-            border-bottom: 0.5mm solid #ccc;
+            border-bottom: 0.5mm solid #eee;
         }
         @media screen { .md-tour-banner { display: none !important; } }
         @media print  { .md-tour-banner[style*="display:none"] { display: none !important; }
@@ -2108,6 +2108,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     if (!banner) return;
                     var tour = o.pt || o.st || '';
                     banner.className = 'md-tour-banner md-active';
+                    banner.style.display = '';  // Inline-style entfernen damit Print-CSS greift
                     banner.textContent = tour;
                 });
 
