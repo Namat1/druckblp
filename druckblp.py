@@ -671,13 +671,10 @@ def prepare_dataframes(
         on="SAP_Nr",
         how="left",
     )
-    # Kategorie wird erst nach dem Kisoft-Merge gesetzt (CSB Tournummer nötig).
-    # Platzhalter damit der Merge unten funktioniert:
-    kunden_basis["Kategorie"] = "Direkt"
 
-    # Basis-Merge: Kundenstamm bekommt Grundinfos aus plan_rows
+    # Basis-Merge: Kundenstamm-Spalten an plan_rows anhängen (ohne Kategorie – wird unten einmal gesetzt)
     plan_rows = df_sap.merge(
-        kunden_basis[["SAP_Nr", "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater", "Kategorie"]],
+        kunden_basis[["SAP_Nr", "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater"]],
         on="SAP_Nr",
         how="left",
     )
@@ -711,22 +708,17 @@ def prepare_dataframes(
     # Kostenstellen-Lookup auf plan_rows (CSB-Tournummer ist jetzt verfuegbar)
     plan_rows = apply_kostenstellen_lookup(plan_rows, df_kostenstellen)
 
-    # Kategorie aus erster CSB Tournummer pro Kunde bestimmen
+    # Kategorie aus erster CSB Tournummer pro Kunde bestimmen (einmaliger Schritt)
     csb_tour_agg = (
         plan_rows[plan_rows["CSB Tournummer"] != ""]
         .drop_duplicates(subset=["SAP_Nr"])
         [["SAP_Nr", "CSB Tournummer"]]
     )
     csb_tour_agg["Kategorie"] = csb_tour_agg["CSB Tournummer"].map(classify_by_csb_tour)
-    kunden_basis = kunden_basis.merge(csb_tour_agg[["SAP_Nr", "Kategorie"]], on="SAP_Nr", how="left", suffixes=("_alt", ""))
-    kunden_basis["Kategorie"] = kunden_basis["Kategorie"].fillna("Direkt")
-    if "Kategorie_alt" in kunden_basis.columns:
-        kunden_basis = kunden_basis.drop(columns=["Kategorie_alt"])
-
-    # Kategorie auch in plan_rows aktualisieren
-    plan_rows = plan_rows.drop(columns=["Kategorie"], errors="ignore")
-    plan_rows = plan_rows.merge(kunden_basis[["SAP_Nr", "Kategorie"]], on="SAP_Nr", how="left")
-    plan_rows["Kategorie"] = plan_rows["Kategorie"].fillna("Direkt")
+    _kat_map = csb_tour_agg.set_index("SAP_Nr")["Kategorie"]
+    # Kategorie auf kunden_basis und plan_rows in einem Schritt (kein Re-Merge nötig)
+    kunden_basis["Kategorie"] = kunden_basis["SAP_Nr"].map(_kat_map).fillna("Direkt")
+    plan_rows["Kategorie"] = plan_rows["SAP_Nr"].map(_kat_map).fillna("Direkt")
 
     # Tourengruppe / Kostenstelle / Leiter zurueck auf kunden_basis aggregieren
     # (erster nicht-leerer Wert pro SAP_Nr, damit die Kundenkarte diese Felder zeigt)
@@ -1536,24 +1528,26 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
 
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
-    def _day_for_row(row) -> str:
-        csb_digits = normalize_digits(normalize_text(row.get("CSB Tournummer", "")))
-        if csb_digits and csb_digits[0].isdigit():
-            return WOCHENTAGE.get(int(csb_digits[0]), "")
-        return normalize_text(row.get("Liefertag", ""))
-
-    # Effizient: nur Zeilen mit CSB-Tour
-    relevant = customer_rows[customer_rows["CSB Tournummer"].map(normalize_text) != ""].copy()
+    # Effizient: nur Zeilen mit CSB-Tour (Daten sind bereits normalisiert)
+    csb_col = customer_rows["CSB Tournummer"].fillna("")
+    relevant = customer_rows[csb_col != ""].copy()
     if relevant.empty:
         return ""
 
-    relevant["_day"] = relevant.apply(_day_for_row, axis=1)
+    # Vectorisiert: Liefertag aus erster Ziffer der CSB-Tournummer ableiten
+    csb_first_digit = relevant["CSB Tournummer"].str.extract(r'^(\d)', expand=False).fillna("")
+    relevant["_day"] = csb_first_digit.map(
+        lambda d: WOCHENTAGE.get(int(d), "") if d.isdigit() else ""
+    )
+    # Fallback: Liefertag-Spalte wo CSB keinen Tag liefert
+    fallback_mask = relevant["_day"] == ""
+    relevant.loc[fallback_mask, "_day"] = relevant.loc[fallback_mask, "Liefertag"].fillna("")
     relevant = relevant[relevant["_day"] != ""]
 
     tour_by_day: dict = {}
     for day, grp in relevant.groupby("_day", sort=False):
         unique_tours = list(dict.fromkeys(
-            normalize_text(t) for t in grp["CSB Tournummer"].tolist() if normalize_text(t)
+            t for t in grp["CSB Tournummer"].tolist() if t
         ))
         if unique_tours:
             tour_by_day[day] = unique_tours
@@ -2359,6 +2353,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
     debug_html = _build_debug_html(debug_data)
     docs_buffer = io.StringIO()
+    search_index: List[str] = []  # Kompaktes JSON-Array statt data-search-Attribut pro Kunde
 
     # Vorab gruppieren statt pro Kunde den gesamten DataFrame zu filtern
     _plan_grouped = {sap: grp for sap, grp in plan_rows.groupby("SAP_Nr")}
@@ -2391,6 +2386,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             ]
             if part
         ).lower()
+        search_index.append(search_blob)
 
         entry_parts: List[str] = []
         if include_separators:
@@ -2401,16 +2397,23 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         cust_name_escaped = html.escape(str(customer.get("Name", "")).lower())
         docs_buffer.write(
             f'<section class="customer-entry" '
+            f'data-idx="{entry_count}" '
             f'data-sap="{html.escape(sap.lower())}" '
             f'data-csb="{html.escape(csb_search)}" '
             f'data-name="{cust_name_escaped}" '
             f'data-kategorie="{html.escape(str(customer.get("Kategorie", "")))}" '
-            f'data-ohne-csb="{1 if not csb_touren else 0}" '
-            f'data-search="{html.escape(search_blob)}">'
+            f'data-ohne-csb="{1 if not csb_touren else 0}">'
             f'{"".join(entry_parts)}'
             f'</section>'
         )
         entry_count += 1
+
+    # Suchdaten als kompaktes JSON-Array – spart ~100KB HTML bei 500 Kunden
+    search_data_script = (
+        '<script>window._searchData='
+        + json.dumps(search_index, ensure_ascii=False)
+        + ';</script>'
+    )
 
     search_script = """
     <script>
@@ -2454,10 +2457,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         function updateCounts() {
             var q = norm(document.getElementById("search-input").value);
+            var SD = window._searchData || [];
             var counts = { alle: 0, MK: 0, Malchow: 0, NMS: 0, SuL: 0, Direkt: 0, "ohne-csb": 0 };
             allEntries.forEach(function (e) {
                 var kat = e.getAttribute("data-kategorie") || "";
-                var blob = norm(e.getAttribute("data-search") || "");
+                var idx = parseInt(e.getAttribute("data-idx"), 10);
+                var blob = norm(SD[idx] || "");
                 var ohnecsb = e.getAttribute("data-ohne-csb") === "1";
                 var matchesSearch = !q || blob.indexOf(q) !== -1;
                 if (matchesSearch) {
@@ -2497,6 +2502,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         function applyFilter() {
             var q = norm(document.getElementById("search-input").value);
+            var SD = window._searchData || [];
             clearHighlights();
             matches = [];
             cursor  = -1;
@@ -2506,7 +2512,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (q) {
                     var firstMatch = null;
                     for (var i = 0; i < allEntries.length; i++) {
-                        var blob = norm(allEntries[i].getAttribute("data-search") || "");
+                        var idx = parseInt(allEntries[i].getAttribute("data-idx"), 10);
+                        var blob = norm(SD[idx] || "");
                         if (blob.indexOf(q) !== -1) { firstMatch = allEntries[i]; break; }
                     }
                     if (firstMatch) {
@@ -2531,7 +2538,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
             allEntries.forEach(function (entry) {
                 var kat  = entry.getAttribute("data-kategorie") || "";
-                var blob = norm(entry.getAttribute("data-search") || "");
+                var idx  = parseInt(entry.getAttribute("data-idx"), 10);
+                var blob = norm(SD[idx] || "");
                 var ohnecsb = entry.getAttribute("data-ohne-csb") === "1";
                 var katOk  = activeKat === "alle" || kat === activeKat || (activeKat === "ohne-csb" && ohnecsb);
                 var srchOk = !q || blob.indexOf(q) !== -1;
@@ -2820,6 +2828,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         </script>
         {massendruck_data_script}
         {logo_head_script}
+        {search_data_script}
     </head>
     <body>
         {render_export_search_toolbar(massendruck_sidebar_section, logo_b64=sidebar_logo_b64, logo_mime=sidebar_logo_mime)}
