@@ -847,6 +847,258 @@ def build_debug_report(
     return reports
 
 
+# ============================================================
+# MASSENDRUCK – STANDARDWOCHE & SORTIERLOGIK
+# ============================================================
+
+def build_day_assignments(
+    sw_sap_bytes: bytes,
+    sw_sap_name: str,
+    sw_kisoft_bytes: bytes,
+    sw_kisoft_name: str,
+    csv_separator: str,
+) -> pd.DataFrame:
+    """Erstellt Tages-Touren-Zuordnung aus Standardwoche SAP + Kisoft.
+
+    Rückgabe: DataFrame mit Spalten
+        SAP_Nr | Liefertag_Num (1-6) | Liefertag_Name | CSB_Tournummer
+    """
+    df_sap = load_structured_upload(sw_sap_bytes, sw_sap_name, csv_separator, "sap")
+    df_kisoft = load_kisoft_upload(sw_kisoft_bytes, sw_kisoft_name, csv_separator)
+
+    df_sap["Kisoft_Key"] = df_sap["Rahmentour_Raw"].map(build_kisoft_key)
+    df_sap["Liefertag_Num"] = (
+        df_sap["Liefertag_Raw"]
+        .map(normalize_digits)
+        .str[:1]
+        .map(lambda d: int(d) if d.isdigit() else 0)
+    )
+
+    df_merged = df_sap.merge(
+        df_kisoft[["SAP Rahmentour", "CSB Tournummer"]],
+        left_on="Kisoft_Key",
+        right_on="SAP Rahmentour",
+        how="left",
+    )
+    df_merged["CSB Tournummer"] = df_merged["CSB Tournummer"].fillna("").map(normalize_text)
+    df_merged["Liefertag_Name"] = df_merged["Liefertag_Num"].map(
+        lambda n: WOCHENTAGE.get(n, "Unbekannt")
+    )
+
+    # Pro Kunde + Liefertag eine Zeile – erste/niedrigste CSB-Tour
+    df_assignments = (
+        df_merged[df_merged["Liefertag_Num"].between(1, 6)]
+        [["SAP_Nr", "Liefertag_Num", "Liefertag_Name", "CSB Tournummer"]]
+        .sort_values(["SAP_Nr", "Liefertag_Num", "CSB Tournummer"])
+        .drop_duplicates(subset=["SAP_Nr", "Liefertag_Num"])
+        .reset_index(drop=True)
+    )
+    return df_assignments
+
+
+def sort_customers_massendruck(
+    customers_df: pd.DataFrame,
+    day_assignments: pd.DataFrame,
+    primary_day: int,
+) -> Tuple[pd.DataFrame, int]:
+    """Sortiert Kunden für den Massendruck nach Primär- und Sekundärtag.
+
+    primary_day: 1–6 (1=Mo … 6=Sa)
+    Sekundärtag = Folgetag (6 → 1).
+
+    Gibt zurück: (sortiertes customers_df mit Zusatzspalten, secondary_day_num)
+    Zusatzspalten: PrimaerTour, SekundaerTour, _prioritaet, _druckreihenfolge
+    """
+    secondary_day = (primary_day % 6) + 1  # 1→2, 2→3, …, 6→1
+
+    primary_df = (
+        day_assignments[day_assignments["Liefertag_Num"] == primary_day]
+        [["SAP_Nr", "CSB Tournummer"]]
+        .rename(columns={"CSB Tournummer": "PrimaerTour"})
+    )
+    secondary_df = (
+        day_assignments[day_assignments["Liefertag_Num"] == secondary_day]
+        [["SAP_Nr", "CSB Tournummer"]]
+        .rename(columns={"CSB Tournummer": "SekundaerTour"})
+    )
+
+    result = customers_df.copy()
+    result = result.merge(primary_df, on="SAP_Nr", how="left")
+    result = result.merge(secondary_df, on="SAP_Nr", how="left")
+    result["PrimaerTour"]   = result.get("PrimaerTour",   pd.Series("", index=result.index)).fillna("")
+    result["SekundaerTour"] = result.get("SekundaerTour", pd.Series("", index=result.index)).fillna("")
+
+    def _sort_key(row: pd.Series) -> tuple:
+        pt = normalize_digits(row["PrimaerTour"])
+        st_ = normalize_digits(row["SekundaerTour"])
+        if row["PrimaerTour"]:
+            return (0, pt.zfill(8), normalize_text(row.get("Name", "")))
+        elif row["SekundaerTour"]:
+            return (1, st_.zfill(8), normalize_text(row.get("Name", "")))
+        else:
+            return (2, "", normalize_text(row.get("Name", "")))
+
+    result["_sort_tuple"] = result.apply(_sort_key, axis=1)
+    result = result.sort_values("_sort_tuple").reset_index(drop=True)
+    result["_prioritaet"] = result.apply(
+        lambda r: "Primär" if r["PrimaerTour"] else ("Sekundär" if r["SekundaerTour"] else "Übrige"),
+        axis=1,
+    )
+    result["_druckreihenfolge"] = range(1, len(result) + 1)
+    result = result.drop(columns=["_sort_tuple"])
+    return result, secondary_day
+
+
+def show_massendruck_section(
+    customers_df: pd.DataFrame,
+    plan_rows_df: pd.DataFrame,
+    debug_reports: Dict[str, pd.DataFrame],
+    logo_b64: str,
+    logo_mime: str,
+    csv_separator: str,
+) -> None:
+    """Rendert den kompletten Massendruck-Bereich in der Streamlit-App."""
+    st.divider()
+    st.subheader("🖨️ Massendruck")
+
+    col_sw1, col_sw2 = st.columns(2, gap="medium")
+    with col_sw1:
+        sw_sap_file = st.file_uploader(
+            "SAP Standardwoche",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            key="sw_sap",
+            help="SAP-Datei der Referenzwoche – bestimmt Liefertag-Zuordnung für die Sortierung",
+        )
+    with col_sw2:
+        sw_kisoft_file = st.file_uploader(
+            "Kisoft Standardwoche",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            key="sw_kisoft",
+            help="Kisoft-Datei der Referenzwoche – liefert CSB-Tournummern für die Sortierung",
+        )
+
+    if not sw_sap_file or not sw_kisoft_file:
+        st.info("SAP- und Kisoft-Standardwoche hochladen um den Massendruck zu konfigurieren.")
+        return
+
+    # Standardwoche verarbeiten (gecacht)
+    try:
+        _sw_key = hashlib.md5(sw_sap_file.getvalue() + sw_kisoft_file.getvalue()).hexdigest()
+        if st.session_state.get("_sw_cache_key") != _sw_key:
+            _day_assignments = build_day_assignments(
+                sw_sap_file.getvalue(), sw_sap_file.name,
+                sw_kisoft_file.getvalue(), sw_kisoft_file.name,
+                csv_separator,
+            )
+            st.session_state["_sw_cache_key"]    = _sw_key
+            st.session_state["_day_assignments"] = _day_assignments
+            st.session_state["_massendruck_ready"] = False
+        day_assignments: pd.DataFrame = st.session_state["_day_assignments"]
+    except Exception as exc:
+        st.error(f"Fehler beim Verarbeiten der Standardwoche: {exc}")
+        return
+
+    # Tag-Auswahl
+    tag_names = list(WOCHENTAGE.values())  # ["Montag", "Dienstag", …, "Samstag"]
+    tag_name_to_num = {v: k for k, v in WOCHENTAGE.items()}
+
+    selected_tag_name = st.radio(
+        "Primärer Drucktag (Sortierung)",
+        tag_names,
+        horizontal=True,
+        key="md_primary_tag",
+    )
+    primary_day_num   = tag_name_to_num[selected_tag_name]
+    secondary_day_num = (primary_day_num % 6) + 1
+    secondary_tag_name = WOCHENTAGE[secondary_day_num]
+
+    st.caption(
+        f"Primär: **{selected_tag_name}** · Sekundär: **{secondary_tag_name}** · "
+        "Übrige Kunden folgen alphabetisch am Ende."
+    )
+
+    # Sortierung berechnen
+    sorted_customers, _ = sort_customers_massendruck(customers_df, day_assignments, primary_day_num)
+
+    prim_count   = int((sorted_customers["_prioritaet"] == "Primär").sum())
+    sek_count    = int((sorted_customers["_prioritaet"] == "Sekundär").sum())
+    uebrig_count = int((sorted_customers["_prioritaet"] == "Übrige").sum())
+
+    st.markdown(
+        f"**{len(sorted_customers)} Kunden** · "
+        f"🟢 Primär ({selected_tag_name}): {prim_count} · "
+        f"🔵 Sekundär ({secondary_tag_name}): {sek_count} · "
+        f"⚪ Übrige: {uebrig_count}"
+    )
+
+    # Vorschau-Tabelle
+    preview_df = sorted_customers[[
+        "_druckreihenfolge", "Name", "SAP_Nr", "Kategorie",
+        "PrimaerTour", "SekundaerTour", "_prioritaet",
+    ]].copy()
+    preview_df.columns = [
+        "Nr.", "Kundenname", "SAP-Nr", "Kategorie",
+        f"Primärtour ({selected_tag_name})",
+        f"Sekundärtour ({secondary_tag_name})",
+        "Priorität",
+    ]
+
+    # Priorität farblich hervorheben – als Streamlit-DataFrame mit column_config
+    st.dataframe(
+        preview_df,
+        use_container_width=True,
+        hide_index=True,
+        height=420,
+        column_config={
+            "Nr.": st.column_config.NumberColumn(width="small"),
+            "Priorität": st.column_config.TextColumn(width="small"),
+        },
+    )
+
+    # Massendruck generieren
+    _md_tag_state_key = f"_md_tag_{primary_day_num}"
+    if st.session_state.get("_md_last_tag") != _md_tag_state_key:
+        st.session_state["_massendruck_ready"] = False
+        st.session_state["_md_last_tag"] = _md_tag_state_key
+
+    if st.button(
+        f"🖨️ Massendruck {selected_tag_name} generieren",
+        use_container_width=True,
+        type="primary",
+        key="btn_massendruck",
+    ):
+        # Hilfsspalten vor dem HTML-Build entfernen
+        clean_customers = sorted_customers.drop(
+            columns=["PrimaerTour", "SekundaerTour", "_prioritaet", "_druckreihenfolge"],
+            errors="ignore",
+        )
+        with st.spinner(f"Generiere Massendruck für {len(clean_customers)} Kunden …"):
+            bulk_html = build_full_document_html(
+                clean_customers,
+                plan_rows_df,
+                logo_b64=logo_b64,
+                logo_mime=logo_mime,
+                debug_data=debug_reports,
+            )
+        st.session_state["_massendruck_html"]  = bulk_html
+        st.session_state["_massendruck_ready"] = True
+
+    if st.session_state.get("_massendruck_ready"):
+        fname = f"massendruck_{selected_tag_name.lower()}.html"
+        st.download_button(
+            label=f"⬇  {fname} herunterladen",
+            data=st.session_state["_massendruck_html"],
+            file_name=fname,
+            mime="text/html",
+            use_container_width=True,
+            key="dl_massendruck",
+        )
+        st.caption(
+            f"HTML im Browser öffnen → Kunden sind nach {selected_tag_name}/{secondary_tag_name}-Touren sortiert. "
+            "Alle Filter und die Druckfunktion sind verfügbar."
+        )
+
+
 def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
     """Zeigt Debug-Reports im Streamlit-Tab."""
     total_issues = sum(len(df) for df in reports.values())
@@ -2267,6 +2519,9 @@ def init_session_state() -> None:
         st.session_state.selected_sap = ""
     if "search_text" not in st.session_state:
         st.session_state.search_text = ""
+    for _k in ["_massendruck_ready"]:
+        if _k not in st.session_state:
+            st.session_state[_k] = False
 
 
 def set_category(category: str) -> None:
@@ -2495,6 +2750,16 @@ def main() -> None:
             use_container_width=True,
         )
         st.caption("HTML im Browser öffnen → Suche, Filter, Druck alles drin.")
+
+    # ── Massendruck ──
+    show_massendruck_section(
+        customers_df=customers_df,
+        plan_rows_df=plan_rows_df,
+        debug_reports=debug_reports,
+        logo_b64=logo_b64,
+        logo_mime=logo_mime,
+        csv_separator=csv_separator,
+    )
 
 
 if __name__ == "__main__":
