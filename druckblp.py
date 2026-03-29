@@ -1737,11 +1737,19 @@ def render_separator_page(customer: pd.Series) -> str:
     """
 
 
-def render_export_search_toolbar(massendruck_section: str = "") -> str:
-    return """
+def render_export_search_toolbar(massendruck_section: str = "", logo_b64: str = "", logo_mime: str = "image/png") -> str:
+    if logo_b64:
+        logo_html = (
+            f'<img src="data:{logo_mime};base64,{logo_b64}" '
+            f'alt="Logo" style="max-width:36px;max-height:36px;width:auto;height:auto;border-radius:6px;flex-shrink:0;">'
+        )
+    else:
+        logo_html = '<div class="sidebar-logo-icon">&#128230;</div>'
+
+    return f"""
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-logo">
-            <div class="sidebar-logo-icon">&#128230;</div>
+            {logo_html}
             <div>
                 <div class="sidebar-logo-text">Sendeplan</div>
                 <div class="sidebar-logo-sub">NORDfrische Center</div>
@@ -2740,7 +2748,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         {logo_head_script}
     </head>
     <body>
-        {render_export_search_toolbar(massendruck_sidebar_section)}
+        {render_export_search_toolbar(massendruck_sidebar_section, logo_b64=logo_b64, logo_mime=logo_mime)}
         <div class="main-content">
         <div class="page-stack">
         {''.join(docs)}
