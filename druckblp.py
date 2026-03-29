@@ -2912,7 +2912,50 @@ def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> N
 def main() -> None:
     init_session_state()
     st.markdown(streamlit_css(), unsafe_allow_html=True)
-    st.title("📦 Sendeplan-Generator")
+
+    # ── App-Header mit Logo-Upload ──
+    h_left, h_right = st.columns([1, 3], gap="medium")
+    with h_left:
+        app_logo_file = st.file_uploader(
+            "Logo hochladen",
+            type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
+            key="app_logo",
+            label_visibility="collapsed",
+            help="Logo für die App-Kopfzeile und jeden gedruckten Sendeplan",
+        )
+        if app_logo_file is not None:
+            st.image(app_logo_file, use_container_width=True)
+        else:
+            st.markdown(
+                """
+                <div style="border:2px dashed #30363d; border-radius:10px; padding:18px 12px;
+                            text-align:center; color:#888; font-size:0.8rem; line-height:1.5;">
+                    📷<br>Logo hochladen<br><span style="font-size:0.7rem;color:#555">PNG · JPG · SVG</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    with h_right:
+        st.markdown(
+            """
+            <div style="padding: 6px 0 2px 0;">
+                <div style="font-size:1.75rem; font-weight:800; color:#e0e0e0; line-height:1.15;
+                            letter-spacing:-0.01em;">
+                    Sende- &amp; Belieferungsplan
+                </div>
+                <div style="font-size:1.05rem; font-weight:500; color:#f0a500; margin-top:3px;
+                            letter-spacing:0.04em;">
+                    NORDfrische Center
+                </div>
+                <div style="font-size:0.78rem; color:#666; margin-top:6px;">
+                    Sendeplan-Generator · EDEKA Nord Fleisch
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.divider()
 
     # ── Uploads ──
     col_left, col_mid, col_right = st.columns(3, gap="medium")
@@ -2928,8 +2971,7 @@ def main() -> None:
                                         help="SAP Rahmentour, CSB Tournummer, Verladetor")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                               help="A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter")
-        logo_file = st.file_uploader("Logo (optional)", type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
-                                      help="Oben rechts auf jedem Sendeplan")
+        logo_file = app_logo_file  # dasselbe Logo aus dem Header verwenden
     with col_right:
         st.markdown("**📅 Massendruck – Standardwoche** *(optional)*")
         st.caption("Liefert Toursortiering für den Massendruck im HTML-Export.")
