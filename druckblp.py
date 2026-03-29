@@ -2095,8 +2095,31 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 return btn ? (btn.getAttribute('data-kat') || 'alle') : 'alle';
             }
 
+            // Ermittelt den nächsten Tag (1-6 zyklisch) der mindestens einen
+            // Kunden mit einer Tour-Zuweisung hat – überspringt leere Tage.
+            function nextDeliveryDay(primaryDay) {
+                // Alle Tage sammeln die tatsächlich Zuweisungen haben
+                var daysWithTours = {};
+                var asgns = MD.assignments;
+                for (var sap in asgns) {
+                    var days = asgns[sap];
+                    for (var d in days) {
+                        if (days[d]) daysWithTours[d] = true;
+                    }
+                }
+                // Zyklisch von primaryDay+1 bis primaryDay (6 Tage, Mo=1 … Sa=6)
+                for (var i = 1; i <= 6; i++) {
+                    var candidate = ((primaryDay - 1 + i) % 6) + 1;
+                    if (candidate !== primaryDay && daysWithTours[String(candidate)]) {
+                        return candidate;
+                    }
+                }
+                // Fallback: nächster Kalendertag
+                return (primaryDay % 6) + 1;
+            }
+
             function computeOrder(primaryDay) {
-                var secondaryDay = (primaryDay % 6) + 1;
+                var secondaryDay = nextDeliveryDay(primaryDay);
                 var entries = window._allEntries || Array.from(document.querySelectorAll('.customer-entry'));
                 var ordered = entries.map(function(entry) {
                     var sap = (entry.getAttribute('data-sap') || '').trim();
@@ -2152,7 +2175,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
             function applyMassendruck(primaryDay) {
                 activeMdDay = primaryDay;
-                var secondaryDay = (primaryDay % 6) + 1;
+                var secondaryDay = nextDeliveryDay(primaryDay);
                 var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
                 var sdName = MD.days[String(secondaryDay)] || ('Tag ' + secondaryDay);
 
@@ -2201,7 +2224,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             window.openMdOverlay = function() {
                 if (activeMdDay === null) return;
                 var primaryDay = activeMdDay;
-                var secondaryDay = (primaryDay % 6) + 1;
+                var secondaryDay = nextDeliveryDay(primaryDay);
                 var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
                 var sdName = MD.days[String(secondaryDay)] || ('Tag ' + secondaryDay);
                 var activeKat = getActiveKat();
