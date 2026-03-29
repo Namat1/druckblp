@@ -2096,18 +2096,30 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             }
 
             // Ermittelt den nächsten Tag (1-6 zyklisch) der mindestens einen
-            // Kunden mit einer Tour-Zuweisung hat – überspringt leere Tage.
+            // Kunden der aktuell aktiven Kategorie mit einer Tour-Zuweisung hat.
             function nextDeliveryDay(primaryDay) {
-                // Alle Tage sammeln die tatsächlich Zuweisungen haben
+                var activeKat = getActiveKat();
+
+                // Alle customer-entry-Elemente nach Kategorie vorfiltern
+                var entries = window._allEntries || Array.from(document.querySelectorAll('.customer-entry'));
+
+                // Tage ermitteln die für die aktive Kategorie Zuweisungen haben
                 var daysWithTours = {};
                 var asgns = MD.assignments;
-                for (var sap in asgns) {
-                    var days = asgns[sap];
+                entries.forEach(function(entry) {
+                    var kat = entry.getAttribute('data-kategorie') || '';
+                    var ohnecsb = entry.getAttribute('data-ohne-csb') === '1';
+                    var katOk = activeKat === 'alle' || kat === activeKat ||
+                                (activeKat === 'ohne-csb' && ohnecsb);
+                    if (!katOk) return;
+                    var sap = (entry.getAttribute('data-sap') || '').trim();
+                    var days = asgns[sap] || {};
                     for (var d in days) {
                         if (days[d]) daysWithTours[d] = true;
                     }
-                }
-                // Zyklisch von primaryDay+1 bis primaryDay (6 Tage, Mo=1 … Sa=6)
+                });
+
+                // Zyklisch von primaryDay+1 durch alle 6 Wochentage
                 for (var i = 1; i <= 6; i++) {
                     var candidate = ((primaryDay - 1 + i) % 6) + 1;
                     if (candidate !== primaryDay && daysWithTours[String(candidate)]) {
