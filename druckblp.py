@@ -2,6 +2,7 @@ import base64
 import hashlib
 import html
 import io
+import json
 import re
 from datetime import datetime
 from pathlib import Path
@@ -623,9 +624,7 @@ def prepare_dataframes(
     df_kisoft = load_kisoft_upload(kisoft_bytes, kisoft_name, csv_separator)
     df_kostenstellen = load_kostenstellen_upload(kostenstellen_bytes, kostenstellen_name, csv_separator)
 
-    for dataset in [df_kunden, df_sap, df_transport, df_kisoft]:
-        for column in dataset.columns:
-            dataset[column] = dataset[column].map(normalize_text)
+    # normalize_text wurde bereits in cleanup_dataframe() angewendet – kein zweiter Pass nötig.
 
     df_sap["Kisoft_Key"] = df_sap["Rahmentour_Raw"].map(build_kisoft_key)
     df_sap["Bestelltag_Name"] = df_sap["Bestelltag"].map(day_name_from_number)
@@ -761,15 +760,15 @@ def build_debug_report(
     else:
         reports["Kein Kisoft-Match"] = pd.DataFrame()
 
-    # 2. Liefertag-Konflikt: Spalte G weicht von CSB-Startzahl ab
-    def _liefertag_konflikt(row):
-        g   = normalize_digits(normalize_text(row.get("Liefertag_Raw", "")))
-        csb = normalize_digits(normalize_text(row.get("CSB Tournummer", "")))
-        if not g or not g[0].isdigit() or not csb or not csb[0].isdigit():
-            return False
-        return g[0] != csb[0]
+    # 2. Liefertag-Konflikt: Spalte G weicht von CSB-Startzahl ab (vektorisiert)
     if "Liefertag_Raw" in plan_rows.columns and csb_col in plan_rows.columns:
-        konflikt_mask = plan_rows.apply(_liefertag_konflikt, axis=1)
+        g_first   = plan_rows["Liefertag_Raw"].map(normalize_digits).str[:1]
+        csb_first = plan_rows[csb_col].map(normalize_digits).str[:1]
+        konflikt_mask = (
+            g_first.str.match(r'\d', na=False)
+            & csb_first.str.match(r'\d', na=False)
+            & (g_first != csb_first)
+        )
         reports["Liefertag-Konflikt SAP↔CSB"] = safe_cols(
             plan_rows[konflikt_mask],
             ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "CSB Tournummer", "Liefertag", "Sortiment"]
@@ -864,8 +863,6 @@ def build_day_assignments(
     Schlüssel im inneren Dict = Liefertag als String ("1"=Mo … "6"=Sa).
     Wird als JSON in die HTML eingebettet – clientseitige JS-Logik übernimmt Sortierung.
     """
-    import json as _json
-
     df_sap = load_structured_upload(sw_sap_bytes, sw_sap_name, csv_separator, "sap")
     df_kisoft = load_kisoft_upload(sw_kisoft_bytes, sw_kisoft_name, csv_separator)
 
@@ -981,12 +978,42 @@ def streamlit_css() -> str:
         .stApp span { color: #e0e0e0; }
         section[data-testid="stSidebar"] { background: #161b22; border-right: 1px solid #21262d; }
         .stFileUploader { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.4rem; }
-        div[data-baseweb="input"] input, .stTextInput input {
+        div[data-baseweb="input"] input,
+        .stTextInput input {
             background: #0d1117 !important; color: #e0e0e0 !important; border-color: #30363d !important;
         }
-        .st-emotion-cache-1v0mbdj, .st-emotion-cache-1wmy9hl { color: #e0e0e0; }
-        .status-ok { color: #3fb950; font-size: 0.85rem; }
+        /* Metric-Werte und -Labels */
+        [data-testid="stMetricValue"] { color: #e0e0e0 !important; }
+        [data-testid="stMetricLabel"] { color: #aaa !important; }
+        .status-ok   { color: #3fb950; font-size: 0.85rem; }
         .status-miss { color: #f85149; font-size: 0.85rem; }
+
+        /* Panel-Komponente */
+        .app-panel {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            padding: 1rem 1.1rem;
+            margin-bottom: 0.75rem;
+        }
+        .app-panel h3 { color: #e0e0e0 !important; }
+        .muted-note { color: #888; font-size: 0.82rem; }
+
+        /* Hero-Card */
+        .hero-card {
+            background: linear-gradient(135deg, #161b22 0%, #0d2035 100%);
+            border: 1px solid #30363d;
+            border-radius: 12px;
+            padding: 1.2rem 1.4rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Status-Grid */
+        .status-grid { display: flex; flex-direction: column; gap: 0.35rem; }
+        .status-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.83rem; }
+        .status-label { color: #888; }
+        .upload-ok   { color: #3fb950; }
+        .upload-missing { color: #f85149; }
     </style>
     """
 
@@ -1430,39 +1457,38 @@ def export_css() -> str:
 
 
 def render_tour_overview(customer_rows: pd.DataFrame) -> str:
-    """Baut die Tourübersicht-Tabelle: Liefertag -> alle CSB-Tournummern.
-    Ein Kunde kann an einem Tag mehrere Touren haben – alle werden angezeigt."""
+    """Baut die Tourübersicht-Tabelle: Liefertag -> alle CSB-Tournummern."""
     if customer_rows.empty:
         return ""
 
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
-    # Touren nach der ersten Ziffer der CSB Tournummer gruppieren (1=Mo … 6=Sa).
-    # Nicht nach Liefertag aus SAP – der kann bei Touren wie 6004 vom CSB-Tag abweichen.
-    tour_by_day: dict = {}
-    for _, row in customer_rows.iterrows():
-        csb = normalize_text(row.get("CSB Tournummer", ""))
-        if not csb:
-            continue
-        csb_digits = normalize_digits(csb)
+
+    def _day_for_row(row) -> str:
+        csb_digits = normalize_digits(normalize_text(row.get("CSB Tournummer", "")))
         if csb_digits and csb_digits[0].isdigit():
-            day_num = int(csb_digits[0])
-            day = WOCHENTAGE.get(day_num, "")
-        else:
-            # Fallback: Liefertag aus SAP
-            day = normalize_text(row.get("Liefertag", ""))
-        if not day:
-            continue
-        if day not in tour_by_day:
-            tour_by_day[day] = []
-        if csb not in tour_by_day[day]:
-            tour_by_day[day].append(csb)
+            return WOCHENTAGE.get(int(csb_digits[0]), "")
+        return normalize_text(row.get("Liefertag", ""))
+
+    # Effizient: nur Zeilen mit CSB-Tour
+    relevant = customer_rows[customer_rows["CSB Tournummer"].map(normalize_text) != ""].copy()
+    if relevant.empty:
+        return ""
+
+    relevant["_day"] = relevant.apply(_day_for_row, axis=1)
+    relevant = relevant[relevant["_day"] != ""]
+
+    tour_by_day: dict = {}
+    for day, grp in relevant.groupby("_day", sort=False):
+        unique_tours = list(dict.fromkeys(
+            normalize_text(t) for t in grp["CSB Tournummer"].tolist() if normalize_text(t)
+        ))
+        if unique_tours:
+            tour_by_day[day] = unique_tours
 
     if not tour_by_day:
         return ""
 
     days_present = [d for d in day_order if d in tour_by_day]
-
-    # Tabulierte Spalten: Liefertag + Tour als zwei Textzeilen
     n_cols = len(days_present)
     label_w = "18mm"
     col_w = f"calc((100% - {label_w}) / {n_cols})"
@@ -1567,17 +1593,18 @@ def render_plan_table(rows: pd.DataFrame) -> str:
 
 
 def logo_img_tag(logo_b64: str, logo_mime: str = "image/png") -> str:
-    """Gibt ein <img>-Tag zurueck. Im Bulk-Export greift die CSS-content-Regel;
-    im Einzel-Export src direkt setzen. Beide haben class=doc-logo-img.
+    """Gibt ein <img>-Tag zurück. Im Bulk-Export wird src per JS gesetzt (einmalig im Head),
+    im Einzel-Export direkt als Data-URI. Beide tragen class=doc-logo-img.
     """
     if logo_b64:
+        # Einzeldokument: src direkt; Bulk: wird per JS-Injection überschrieben (kein doppeltes Einbetten)
         return (
             f'<img class="doc-logo-img" '
             f'src="data:{logo_mime};base64,{logo_b64}" '
             f'alt="NORDfrische Center" '
             f'style="max-width:44mm; max-height:20mm; width:auto; height:auto; display:block; margin-left:auto;">'
         )
-    # CSS-Fallback
+    # CSS-Fallback ohne Logo
     return """
         <div style="display:inline-flex; align-items:flex-start; gap:3px;">
             <div style="border:1.5px solid #003366; padding:2mm 3mm; line-height:1.25; display:inline-block;">
@@ -1591,8 +1618,22 @@ def logo_img_tag(logo_b64: str, logo_mime: str = "image/png") -> str:
         </div>"""
 
 
+def _logo_bulk_placeholder() -> str:
+    """Im Bulk-Export: leeres img-Tag, src wird per JS aus window.LOGO_DATA gesetzt."""
+    return (
+        '<img class="doc-logo-img" src="" alt="NORDfrische Center" '
+        'style="max-width:44mm; max-height:20mm; width:auto; height:auto; display:block; margin-left:auto;">'
+    )
 
-def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_b64: str = "", logo_mime: str = "image/png") -> str:
+
+
+def render_customer_plan(
+    customer: pd.Series,
+    customer_rows: pd.DataFrame,
+    logo_b64: str = "",
+    logo_mime: str = "image/png",
+    bulk_mode: bool = False,
+) -> str:
     """Rendert eine einzelne Kundenseite exakt nach dem PDF-Vorbild."""
     sap_nr      = normalize_text(customer.get("SAP_Nr", ""))
     csb_nr      = normalize_text(customer.get("CSB_Nr", ""))
@@ -1634,7 +1675,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
             </div>
 
             <div class="doc-logo">
-                {logo_img_tag(logo_b64, logo_mime)}
+                {_logo_bulk_placeholder() if bulk_mode else logo_img_tag(logo_b64, logo_mime)}
             </div>
         </div>
 
@@ -1748,45 +1789,64 @@ def render_export_search_toolbar(massendruck_section: str = "") -> str:
     """
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None) -> str:
-    # Kein dynamischer Logo-Load – src direkt im img-Tag, Browser cached automatisch
-    logo_head_script = ""
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, logo_b64: str = "", logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None) -> str:
+    # Logo einmalig als JS-Variable – wird nach DOMContentLoaded auf alle Bilder gesetzt.
+    # Spart mehrere MB bei größeren Kundenstämmen (logo_b64 × N Kunden).
+    if logo_b64:
+        logo_head_script = f"""
+        <script>
+        (function() {{
+            var src = "data:{logo_mime};base64,{logo_b64}";
+            document.addEventListener("DOMContentLoaded", function() {{
+                document.querySelectorAll(".doc-logo-img").forEach(function(img) {{ img.src = src; }});
+            }});
+        }})();
+        </script>"""
+    else:
+        logo_head_script = ""
 
-    # Debug-HTML aus debug_data aufbauen
     def _build_debug_html(data: Optional[Dict[str, pd.DataFrame]]) -> str:
         if not data:
             return ""
         sections = []
+        all_csv_parts: List[str] = []
+
         for title, df in data.items():
             count = len(df)
             icon = "✅" if count == 0 else "⚠️"
             if df.empty:
                 rows_html = "<tr><td colspan='99' style='color:#888;padding:8px'>Keine Einträge</td></tr>"
                 thead_html = ""
+                export_btn = ""
             else:
                 cols = list(df.columns)
+                # Thead
                 thead_html = "<thead><tr>" + "".join(f"<th>{html.escape(c)}</th>" for c in cols) + "</tr></thead>"
-                rows_html = ""
+                # Tbody + CSV in einem Durchgang
+                rows_html_parts: List[str] = []
+                csv_lines: List[str] = [";".join(cols)]
                 for _, row in df.iterrows():
-                    rows_html += "<tr>" + "".join(
-                        f"<td>{html.escape(str(row[c]))}</td>" for c in cols
-                    ) + "</tr>"
-            # CSV als data-URI
-            if not df.empty:
-                _cols = list(df.columns)
-                _csv_lines = [";".join(_cols)]
-                for _, _row in df.iterrows():
-                    _csv_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
-                _csv_bytes = "\n".join(_csv_lines).encode("utf-8-sig")
-                _csv_b64 = base64.b64encode(_csv_bytes).decode()
-                _safe_title = title.replace("/", "-").replace(" ", "_")
+                    row_cells = [str(row[c]) for c in cols]
+                    rows_html_parts.append("<tr>" + "".join(
+                        f"<td>{html.escape(cell)}</td>" for cell in row_cells
+                    ) + "</tr>")
+                    csv_lines.append(";".join(f'"{cell}"' for cell in row_cells))
+                rows_html = "".join(rows_html_parts)
+
+                # CSV als data-URI für diesen Report
+                csv_bytes = "\n".join(csv_lines).encode("utf-8-sig")
+                csv_b64 = base64.b64encode(csv_bytes).decode()
+                safe_title = title.replace("/", "-").replace(" ", "_")
                 export_btn = (
-                    f'<a class="dbg-export" ' 
-                    f'href="data:text/csv;base64,{_csv_b64}" ' 
-                    f'download="debug_{html.escape(_safe_title)}.csv">&#8595; CSV</a>'
+                    f'<a class="dbg-export" '
+                    f'href="data:text/csv;base64,{csv_b64}" '
+                    f'download="debug_{html.escape(safe_title)}.csv">&#8595; CSV</a>'
                 )
-            else:
-                export_btn = ""
+
+                # Für Gesamt-Export sammeln
+                all_csv_parts.append(f"=== {title} ===")
+                all_csv_parts.extend(csv_lines)
+                all_csv_parts.append("")
 
             sections.append(f"""
             <div class="dbg-section">
@@ -1805,36 +1865,23 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 </div>
             </div>""")
 
-        # Gesamt-Export aller nicht-leeren Reports
-        _all_lines = []
-        for _t, _df in data.items():
-            if not _df.empty:
-                _all_lines.append(f"=== {_t} ===")
-                _cols = list(_df.columns)
-                _all_lines.append(";".join(_cols))
-                for _, _row in _df.iterrows():
-                    _all_lines.append(";".join(f'"{str(_row[c])}"' for c in _cols))
-                _all_lines.append("")
-        if _all_lines:
-            _all_bytes = "\n".join(_all_lines).encode("utf-8-sig")
-            _all_b64 = base64.b64encode(_all_bytes).decode()
-            _gesamt_btn = (
-                f'<a class="dbg-gesamt-export" ' 
-                f'href="data:text/csv;base64,{_all_b64}" ' 
+        # Gesamt-Export
+        if all_csv_parts:
+            all_bytes = "\n".join(all_csv_parts).encode("utf-8-sig")
+            all_b64 = base64.b64encode(all_bytes).decode()
+            gesamt_btn = (
+                f'<a class="dbg-gesamt-export" '
+                f'href="data:text/csv;base64,{all_b64}" '
                 f'download="sendeplan_debug_gesamt.csv">&#8595; Alle exportieren</a>'
             )
-        else:
-            _gesamt_btn = ""
-        sections.insert(0, f'<div style="padding:0 0 12px 0;">{_gesamt_btn}</div>')
+            sections.insert(0, f'<div style="padding:0 0 12px 0;">{gesamt_btn}</div>')
 
         return "".join(sections)
 
-    import json as _json
-
     # ── Massendruck: JSON-Daten + Sidebar-Sektion + JS aufbauen ──
     if massendruck_data:
-        md_json = _json.dumps(massendruck_data, ensure_ascii=False)
-        md_days_json = _json.dumps({str(k): v for k, v in WOCHENTAGE.items()}, ensure_ascii=False)
+        md_json = json.dumps(massendruck_data, ensure_ascii=False)
+        md_days_json = json.dumps({str(k): v for k, v in WOCHENTAGE.items()}, ensure_ascii=False)
         massendruck_data_script = f"""
         <script>
         window.MASSENDRUCK = {{
@@ -2223,7 +2270,10 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             if part
         ).lower()
 
-        entry_parts: List[str] = [render_customer_plan(customer, rows, logo_b64=logo_b64, logo_mime=logo_mime)]
+        entry_parts: List[str] = []
+        if include_separators:
+            entry_parts.append(render_separator_page(customer))
+        entry_parts.append(render_customer_plan(customer, rows, logo_b64="", logo_mime=logo_mime, bulk_mode=True))
 
         csb_search = " ".join([part for part in [csb_nr, *csb_touren] if part]).lower()
         cust_name_escaped = html.escape(normalize_text(customer.get("Name", "")).lower())
@@ -2812,7 +2862,6 @@ def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> N
 def main() -> None:
     init_session_state()
     st.markdown(streamlit_css(), unsafe_allow_html=True)
-
     st.title("📦 Sendeplan-Generator")
 
     # ── Uploads ──
@@ -2832,7 +2881,8 @@ def main() -> None:
         logo_file = st.file_uploader("Logo (optional)", type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
                                       help="Oben rechts auf jedem Sendeplan")
     with col_right:
-        st.markdown("**Massendruck – Standardwoche**")
+        st.markdown("**📅 Massendruck – Standardwoche** *(optional)*")
+        st.caption("Liefert Toursortiering für den Massendruck im HTML-Export.")
         sw_sap_file = st.file_uploader(
             "SAP Standardwoche",
             type=["xlsx", "xls", "xlsm", "csv"],
@@ -2851,6 +2901,15 @@ def main() -> None:
         "kisoft": kisoft_file, "kostenstellen": kostenstellen_file,
     }
 
+    # ── CSV-Trennzeichen ──
+    csv_separator = st.selectbox(
+        "CSV-Trennzeichen",
+        options=[";", ",", "\t"],
+        format_func=lambda x: {";" : "Semikolon ;", ",": "Komma ,", "\t": "Tab ⇥"}[x],
+        index=0,
+        help="Nur relevant für CSV-Uploads. Excel-Dateien ignorieren diese Einstellung.",
+    )
+
     # ── Status-Zeile ──
     uploaded = sum(1 for v in upload_map.values() if v is not None)
     file_names = [f'<span class="status-ok">✓ {html.escape(v.name)}</span>' if v else '<span class="status-miss">✗ fehlt</span>'
@@ -2863,13 +2922,13 @@ def main() -> None:
         st.info("Alle 5 Dateien hochladen, dann erscheint der Button.")
         return
 
-    # ── Daten verarbeiten ──
-    csv_separator = ";"
+    # ── Daten verarbeiten (csv_separator kommt aus Selectbox oben) ──
     try:
         _cache_key = hashlib.md5(
             kunden_file.getvalue() + sap_file.getvalue() +
             transport_file.getvalue() + kisoft_file.getvalue() +
-            kostenstellen_file.getvalue()
+            kostenstellen_file.getvalue() +
+            csv_separator.encode()
         ).hexdigest()
 
         if st.session_state.get("_df_cache_key") != _cache_key:
@@ -2898,12 +2957,6 @@ def main() -> None:
         st.session_state["_debug_cache_key"] = _data_key
     debug_reports = st.session_state["_debug_reports"]
 
-    # ── Kurzinfo ──
-    cat_parts = [f"{k}: {v}" for k, v in counts.items() if k != "Alle"]
-    st.markdown(
-        f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen · {' · '.join(cat_parts)}"
-    )
-
     # ── Logo vorbereiten ──
     logo_b64 = ""
     logo_mime = "image/png"
@@ -2912,10 +2965,6 @@ def main() -> None:
         ext = logo_file.name.rsplit(".", 1)[-1].lower()
         logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                      "svg": "image/svg+xml", "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
-
-    st.divider()
-
-    st.divider()
 
     # ── Massendruck-Daten vorbereiten (gecacht) ──
     md_data = None
@@ -2930,32 +2979,102 @@ def main() -> None:
                 )
                 st.session_state["_sw_cache_key"] = _sw_key
             md_data = st.session_state.get("_day_assignments")
-            st.caption("✓ Standardwoche geladen – Massendruck-Sortierung im HTML verfügbar.")
         except Exception as exc:
             st.warning(f"Standardwoche konnte nicht verarbeitet werden: {exc}")
 
-    # ── Der eine Button ──
-    if st.button("⚡ Plan generieren", use_container_width=True, type="primary"):
-        with st.spinner(f"Generiere HTML für {len(customers_df)} Kunden …"):
-            bulk_html = build_full_document_html(
-                customers_df, plan_rows_df,
-                logo_b64=logo_b64, logo_mime=logo_mime,
-                debug_data=debug_reports,
-                massendruck_data=md_data,
-            )
-        st.session_state["_export_html"] = bulk_html
-        st.session_state["_export_ready"] = True
+    st.divider()
 
-    # ── Download ──
-    if st.session_state.get("_export_ready"):
-        st.download_button(
-            label="⬇  sendeplan.html herunterladen",
-            data=st.session_state["_export_html"],
-            file_name="sendeplan.html",
-            mime="text/html",
-            use_container_width=True,
+    # ── Tabs: Plan | Vorschau | Debug ──
+    total_issues = sum(len(df) for df in debug_reports.values())
+    debug_label = f"🔍 Debug ({total_issues} ⚠️)" if total_issues > 0 else "🔍 Debug ✅"
+    tab_plan, tab_preview, tab_debug = st.tabs(["⚡ Export", "👁 Kundenvorschau", debug_label])
+
+    # ── Tab: Export ──
+    with tab_plan:
+        cat_parts = [f"{k}: {v}" for k, v in counts.items() if k != "Alle"]
+        st.markdown(
+            f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen · {' · '.join(cat_parts)}"
         )
-        st.caption("HTML im Browser öffnen → Suche, Filter, Druck alles drin.")
+        if md_data:
+            st.caption("✓ Standardwoche geladen – Massendruck-Sortierung im HTML verfügbar.")
+
+        include_sep = st.checkbox(
+            "Trennseiten einfügen (Separator-Pages vor jedem Kunden)",
+            value=False,
+            help="Fügt vor jede Kundenseite ein A4-Deckblatt mit Name und SAP-Nr. ein.",
+        )
+
+        if st.button("⚡ Plan generieren", use_container_width=True, type="primary"):
+            progress = st.progress(0, text="Vorbereitung …")
+            n = len(customers_df)
+            _plan_grouped = {sap: grp for sap, grp in plan_rows_df.groupby("SAP_Nr")}
+            # Fortschritt: HTML-Build mit Zwischenmeldungen
+            with st.spinner(f"Generiere HTML für {n} Kunden …"):
+                bulk_html = build_full_document_html(
+                    customers_df, plan_rows_df,
+                    include_separators=include_sep,
+                    logo_b64=logo_b64, logo_mime=logo_mime,
+                    debug_data=debug_reports,
+                    massendruck_data=md_data,
+                )
+            progress.progress(100, text="Fertig!")
+            st.session_state["_export_html"] = bulk_html
+            st.session_state["_export_ready"] = True
+
+        if st.session_state.get("_export_ready"):
+            html_bytes = st.session_state["_export_html"].encode("utf-8")
+            size_kb = len(html_bytes) / 1024
+            size_label = f"{size_kb/1024:.1f} MB" if size_kb > 1024 else f"{size_kb:.0f} KB"
+            st.download_button(
+                label=f"⬇  sendeplan.html herunterladen  ({size_label})",
+                data=html_bytes,
+                file_name="sendeplan.html",
+                mime="text/html",
+                use_container_width=True,
+            )
+            st.caption("HTML im Browser öffnen → Suche, Filter, Druck alles drin.")
+
+    # ── Tab: Kundenvorschau ──
+    with tab_preview:
+        st.markdown("Wähle einen Kunden zur schnellen Voransicht – ohne vollen HTML-Export.")
+
+        # Kategorie-Filter
+        kat_filter = st.selectbox(
+            "Kategorie filtern",
+            options=KATEGORIEN,
+            index=0,
+            key="preview_kat",
+        )
+        search_input = st.text_input(
+            "Suche (Name, SAP, CSB, Ort)",
+            key="preview_search",
+            placeholder="z.B. Edeka Muster oder 1234567",
+        )
+
+        filtered = filter_customers(customers_df, kat_filter, search_input)
+
+        if filtered.empty:
+            st.warning("Keine Kunden gefunden.")
+        else:
+            option_labels = {
+                row["SAP_Nr"]: f"{row['SAP_Nr']}  |  {row['Name']}  |  {row['Ort']}"
+                for _, row in filtered.iterrows()
+            }
+            selected_sap = st.selectbox(
+                f"{len(filtered)} Kunden gefunden – auswählen:",
+                options=list(option_labels.keys()),
+                format_func=lambda k: option_labels[k],
+                key="preview_select",
+            )
+            if selected_sap:
+                customer_row = customers_df[customers_df["SAP_Nr"] == selected_sap].iloc[0]
+                customer_plan_rows = plan_rows_df[plan_rows_df["SAP_Nr"] == selected_sap]
+                st.divider()
+                show_customer_preview(customer_row, customer_plan_rows)
+
+    # ── Tab: Debug ──
+    with tab_debug:
+        render_debug_tab(debug_reports)
 
 
 if __name__ == "__main__":
