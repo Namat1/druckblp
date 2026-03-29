@@ -2688,6 +2688,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         }});
         </script>
         {massendruck_data_script}
+        {logo_head_script}
     </head>
     <body>
         {render_export_search_toolbar(massendruck_sidebar_section)}
