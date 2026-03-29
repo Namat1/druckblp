@@ -1287,7 +1287,7 @@ def export_css() -> str:
             color: #111;
         }
         .doc-subtitle {
-            font-size: 11pt;
+            font-size: 22pt;
             font-weight: 700;
             color: #c00;
             margin-bottom: 1mm;
