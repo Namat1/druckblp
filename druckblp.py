@@ -2005,7 +2005,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             background: none;
             color: #ccc;
             padding: 4mm 0 2mm 6mm;
-            margin: -14mm -15mm 3mm -15mm;
+            margin: -6mm -15mm 3mm -15mm;
             font-family: 'Courier New', monospace;
             font-size: 11pt;
             font-weight: 900;
