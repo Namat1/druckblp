@@ -1844,7 +1844,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         massendruck_sidebar_section = """
         <div class="sidebar-section md-section" id="md-section">
-            <div class="sidebar-label">&#128438; Massendruck</div>
+            <div class="sidebar-label">&#128438; Massendruck &ndash; Sortiert auf Normalwoche</div>
             <div class="md-day-row" id="md-day-row">
                 <button class="md-day-btn" data-day="1">Mo</button>
                 <button class="md-day-btn" data-day="2">Di</button>
@@ -1854,20 +1854,43 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 <button class="md-day-btn" data-day="6">Sa</button>
             </div>
             <div class="md-stats" id="md-stats" style="display:none"></div>
-            <div class="md-table-wrap" id="md-table-wrap" style="display:none">
-                <table class="md-table">
-                    <thead><tr>
-                        <th>#</th><th>Kunde</th>
-                        <th id="md-th-p">Primär</th>
-                        <th id="md-th-s">Sekundär</th>
-                        <th></th>
-                    </tr></thead>
-                    <tbody id="md-table-body"></tbody>
-                </table>
+            <div class="md-btn-row" id="md-btn-row" style="display:none">
+                <button type="button" class="md-overview-btn" onclick="openMdOverlay()">
+                    &#128269; Reihenfolge ansehen
+                </button>
+                <button type="button" class="sidebar-print-btn md-print-btn"
+                    onclick="printMassendruck()">&#128438; Drucken (aktive Kategorie)</button>
             </div>
-            <button type="button" class="sidebar-print-btn md-print-btn"
-                id="md-print-btn" style="display:none;margin-top:8px;"
-                onclick="printMassendruck()">&#128438; Alle drucken</button>
+        </div>
+
+        <!-- Massendruck Overlay -->
+        <div id="md-overlay" class="md-overlay" style="display:none" onclick="if(event.target===this)closeMdOverlay()">
+            <div class="md-overlay-box">
+                <div class="md-overlay-header">
+                    <div class="md-overlay-title" id="md-overlay-title">Druckreihenfolge</div>
+                    <button class="md-overlay-close" onclick="closeMdOverlay()">&#10005;</button>
+                </div>
+                <div class="md-overlay-stats" id="md-overlay-stats"></div>
+                <div class="md-overlay-table-wrap">
+                    <table class="md-table">
+                        <thead><tr>
+                            <th style="width:36px">#</th>
+                            <th>Kundenname</th>
+                            <th style="width:54px">SAP-Nr</th>
+                            <th style="width:70px">Kategorie</th>
+                            <th id="md-th-p" style="width:72px">Prim\u00e4r</th>
+                            <th id="md-th-s" style="width:72px">Sekund\u00e4r</th>
+                            <th style="width:70px">Priorit\u00e4t</th>
+                        </tr></thead>
+                        <tbody id="md-table-body"></tbody>
+                    </table>
+                </div>
+                <div class="md-overlay-footer">
+                    <button type="button" class="sidebar-print-btn" style="width:auto;padding:10px 28px"
+                        onclick="printMassendruck()">&#128438; Drucken (aktive Kategorie)</button>
+                    <button type="button" class="md-overview-btn" onclick="closeMdOverlay()">Schlie\u00dfen</button>
+                </div>
+            </div>
         </div>"""
 
         massendruck_css = """
@@ -1885,33 +1908,95 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         .md-day-btn:hover { background: var(--bg-hover); color: #fff; }
         .md-day-btn.active { background: var(--accent); color: var(--ink); border-color: transparent; }
         .md-stats {
-            font-size: 10px; line-height: 1.7; margin-bottom: 6px;
+            font-size: 10px; line-height: 1.8; margin-bottom: 6px;
             padding: 5px 8px; background: rgba(255,255,255,0.04);
             border-radius: 6px; border: 1px solid var(--border);
         }
-        .md-table-wrap {
-            max-height: 240px; overflow-y: auto;
-            border: 1px solid var(--border); border-radius: 6px;
-            margin-bottom: 6px;
-            scrollbar-width: thin; scrollbar-color: var(--bg-hover) transparent;
+        .md-btn-row {
+            display: flex; flex-direction: column; gap: 5px;
+        }
+        .md-overview-btn {
+            display: block; width: 100%;
+            border: 1px solid var(--border); border-radius: 8px;
+            padding: 8px 10px; font-size: 12px; font-weight: 600;
+            font-family: inherit; cursor: pointer;
+            background: rgba(255,255,255,0.06); color: #ccc;
+            text-align: center; transition: all 0.15s;
+        }
+        .md-overview-btn:hover { background: rgba(255,255,255,0.12); color: #fff; }
+        .md-print-btn { margin: 0 !important; width: 100% !important; font-size: 12px !important; }
+
+        /* ── Overlay ── */
+        .md-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.72);
+            z-index: 500;
+            display: flex; align-items: center; justify-content: center;
+            padding: 20px;
+        }
+        .md-overlay-box {
+            background: #111b25;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px;
+            width: min(900px, 96vw);
+            max-height: 88vh;
+            display: flex; flex-direction: column;
+            box-shadow: 0 24px 80px rgba(0,0,0,0.7);
+            overflow: hidden;
+        }
+        .md-overlay-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 18px 22px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            flex-shrink: 0;
+        }
+        .md-overlay-title {
+            font-size: 15px; font-weight: 700; color: #fff;
+        }
+        .md-overlay-close {
+            background: none; border: none; color: #888; font-size: 18px;
+            cursor: pointer; padding: 4px 8px; border-radius: 6px;
+            transition: all 0.15s;
+        }
+        .md-overlay-close:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .md-overlay-stats {
+            padding: 10px 22px 8px;
+            font-size: 12px; line-height: 1.8; color: #aaa;
+            flex-shrink: 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+        .md-overlay-table-wrap {
+            flex: 1; overflow-y: auto; overflow-x: auto;
+            scrollbar-width: thin; scrollbar-color: #1e3347 transparent;
+        }
+        .md-overlay-footer {
+            padding: 14px 22px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+            display: flex; gap: 10px; align-items: center;
+            flex-shrink: 0;
         }
         .md-table {
-            width: 100%; border-collapse: collapse; font-size: 10px;
+            width: 100%; border-collapse: collapse; font-size: 12px;
         }
         .md-table thead th {
             position: sticky; top: 0;
-            background: #0d2035; color: #aaa; padding: 4px 5px;
-            text-align: left; font-size: 9px; letter-spacing: 0.05em;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
+            background: #0d2035; color: #aaa; padding: 8px 12px;
+            text-align: left; font-size: 10px; letter-spacing: 0.06em;
+            font-weight: 700; text-transform: uppercase;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            white-space: nowrap;
         }
         .md-table tbody td {
-            padding: 3px 5px; border-bottom: 1px solid rgba(255,255,255,0.04);
-            color: #ccc; white-space: nowrap;
+            padding: 7px 12px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+            color: #ccc;
         }
         .md-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
-        .md-table .md-tour { font-family: 'Courier New', monospace; }
-        .md-print-btn { margin: 0 0 8px 0 !important; width: 100% !important; }
-        @media print { .md-section { display: none !important; } }
+        .md-table .md-tour { font-family: 'Courier New', monospace; font-size: 11px; }
+        .md-prio-p { color: #3fb950; font-weight: 700; }
+        .md-prio-s { color: #58a6ff; font-weight: 700; }
+        .md-prio-u { color: #555; }
+        @media print { .md-section, .md-overlay { display: none !important; } }
         """
 
         massendruck_js = """
@@ -1920,9 +2005,15 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             if (!window.MASSENDRUCK) return;
             var MD = window.MASSENDRUCK;
             var activeMdDay = null;
+            var lastOrdered = [];
 
             function escHtml(s) {
                 return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            }
+
+            function getActiveKat() {
+                var btn = document.querySelector('.filter-btn.active');
+                return btn ? (btn.getAttribute('data-kat') || 'alle') : 'alle';
             }
 
             function computeOrder(primaryDay) {
@@ -1931,16 +2022,53 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 var ordered = entries.map(function(entry) {
                     var sap = (entry.getAttribute('data-sap') || '').trim();
                     var name = entry.getAttribute('data-name') || '';
+                    var kat  = entry.getAttribute('data-kategorie') || '';
+                    var sap_display = entry.getAttribute('data-sap') || '';
                     var asgn = MD.assignments[sap] || {};
                     var pt = asgn[String(primaryDay)] || '';
                     var st = asgn[String(secondaryDay)] || '';
                     var prio = pt ? 0 : (st ? 1 : 2);
                     var tourDigits = (pt || st || '').replace(/\\D/g,'').padStart(8,'0');
                     return { entry: entry, pt: pt, st: st, prio: prio, name: name,
+                             kat: kat, sap: sap_display,
                              key: prio + tourDigits + name };
                 });
                 ordered.sort(function(a,b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
                 return ordered;
+            }
+
+            function buildTable(ordered, pdName, sdName) {
+                var thP = document.getElementById('md-th-p');
+                var thS = document.getElementById('md-th-s');
+                if (thP) thP.textContent = pdName.slice(0,2) + '-Tour (Prim\u00e4r)';
+                if (thS) thS.textContent = sdName.slice(0,2) + '-Tour (Sekund\u00e4r)';
+
+                var activeKat = getActiveKat();
+                var tbody = document.getElementById('md-table-body');
+                tbody.innerHTML = '';
+                var nr = 0;
+                ordered.forEach(function(o) {
+                    var katOk = activeKat === 'alle' || o.kat === activeKat ||
+                                (activeKat === 'ohne-csb' && o.entry.getAttribute('data-ohne-csb') === '1');
+                    if (!katOk) return;
+                    nr++;
+                    var prioLabel = o.prio===0
+                        ? '<span class="md-prio-p">Prim\u00e4r</span>'
+                        : o.prio===1
+                            ? '<span class="md-prio-s">Sekund\u00e4r</span>'
+                            : '<span class="md-prio-u">\u00dcbrig</span>';
+                    var tr = document.createElement('tr');
+                    tr.innerHTML =
+                        '<td style="color:#555;text-align:right;padding-right:8px">' + nr + '</td>' +
+                        '<td style="font-weight:600;color:#e0e0e0">' + escHtml(o.name) + '</td>' +
+                        '<td style="font-family:monospace;font-size:11px;color:#888">' + escHtml(o.sap) + '</td>' +
+                        '<td style="font-size:11px;color:#aaa">' + escHtml(o.kat) + '</td>' +
+                        '<td class="md-tour" style="color:#f0a500">' + escHtml(o.pt) + '</td>' +
+                        '<td class="md-tour" style="color:#58a6ff">' + escHtml(o.st) + '</td>' +
+                        '<td>' + prioLabel + '</td>';
+                    tbody.appendChild(tr);
+                });
+                return nr;
             }
 
             function applyMassendruck(primaryDay) {
@@ -1949,58 +2077,32 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
                 var sdName = MD.days[String(secondaryDay)] || ('Tag ' + secondaryDay);
 
-                var ordered = computeOrder(primaryDay);
+                lastOrdered = computeOrder(primaryDay);
 
                 // DOM-Reihenfolge anpassen
                 var stack = document.querySelector('.page-stack');
-                ordered.forEach(function(o) { stack.appendChild(o.entry); });
+                lastOrdered.forEach(function(o) { stack.appendChild(o.entry); });
+                window._allEntries = lastOrdered.map(function(o) { return o.entry; });
 
-                // window._allEntries synchronisieren damit Such-IIFE korrekte Reihenfolge hat
-                window._allEntries = ordered.map(function(o) { return o.entry; });
+                // Zählungen (alle, unabhängig von Kategorie-Filter)
+                var pCount = lastOrdered.filter(function(o){ return o.prio===0; }).length;
+                var sCount = lastOrdered.filter(function(o){ return o.prio===1; }).length;
+                var uCount = lastOrdered.filter(function(o){ return o.prio===2; }).length;
 
-                // Zählungen
-                var pCount = ordered.filter(function(o){ return o.prio===0; }).length;
-                var sCount = ordered.filter(function(o){ return o.prio===1; }).length;
-                var uCount = ordered.filter(function(o){ return o.prio===2; }).length;
+                var activeKat = getActiveKat();
+                var katLabel = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
 
-                // Statistik
+                // Sidebar-Statistik
                 var stats = document.getElementById('md-stats');
                 stats.style.display = '';
                 stats.innerHTML =
                     '<span style="color:#3fb950">&#9679; Prim\u00e4r (' + escHtml(pdName) + '): <strong>' + pCount + '</strong></span><br>' +
                     '<span style="color:#58a6ff">&#9679; Sekund\u00e4r (' + escHtml(sdName) + '): <strong>' + sCount + '</strong></span><br>' +
-                    '<span style="color:#666">&#9679; \u00dcbrige: <strong>' + uCount + '</strong></span>';
+                    '<span style="color:#666">&#9679; \u00dcbrige: <strong>' + uCount + '</strong></span><br>' +
+                    '<span style="color:#f0a500;font-size:9px">Druck: ' + escHtml(katLabel) + '</span>';
 
-                // Spaltenköpfe
-                var thP = document.getElementById('md-th-p');
-                var thS = document.getElementById('md-th-s');
-                if (thP) thP.textContent = pdName.slice(0,2) + '-Tour';
-                if (thS) thS.textContent = sdName.slice(0,2) + '-Tour';
-
-                // Tabelle
-                var tbody = document.getElementById('md-table-body');
-                tbody.innerHTML = '';
-                ordered.forEach(function(o, i) {
-                    var dot = o.prio===0
-                        ? '<span style="color:#3fb950">&#9679;</span>'
-                        : o.prio===1
-                            ? '<span style="color:#58a6ff">&#9679;</span>'
-                            : '<span style="color:#444">&#9679;</span>';
-                    var tr = document.createElement('tr');
-                    var nameShort = o.name.length > 14 ? o.name.slice(0,13) + '\u2026' : o.name;
-                    tr.innerHTML =
-                        '<td style="color:#555;min-width:20px">' + (i+1) + '</td>' +
-                        '<td style="max-width:80px;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(o.name) + '">' + escHtml(nameShort) + '</td>' +
-                        '<td class="md-tour" style="color:#f0a500">' + escHtml(o.pt) + '</td>' +
-                        '<td class="md-tour" style="color:#58a6ff">' + escHtml(o.st) + '</td>' +
-                        '<td>' + dot + '</td>';
-                    tbody.appendChild(tr);
-                });
-
-                var tw = document.getElementById('md-table-wrap');
-                var pb = document.getElementById('md-print-btn');
-                if (tw) tw.style.display = '';
-                if (pb) pb.style.display = '';
+                var row = document.getElementById('md-btn-row');
+                if (row) row.style.display = '';
 
                 // Tag-Buttons
                 document.querySelectorAll('.md-day-btn').forEach(function(b) {
@@ -2008,15 +2110,45 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 });
             }
 
+            window.openMdOverlay = function() {
+                if (activeMdDay === null) return;
+                var primaryDay = activeMdDay;
+                var secondaryDay = (primaryDay % 6) + 1;
+                var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
+                var sdName = MD.days[String(secondaryDay)] || ('Tag ' + secondaryDay);
+                var activeKat = getActiveKat();
+                var katLabel = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
+
+                var title = document.getElementById('md-overlay-title');
+                if (title) title.textContent =
+                    'Druckreihenfolge \u2013 ' + pdName + ' (Prim\u00e4r) / ' + sdName + ' (Sekund\u00e4r)';
+
+                var nr = buildTable(lastOrdered, pdName, sdName);
+
+                var ostats = document.getElementById('md-overlay-stats');
+                var pCount = lastOrdered.filter(function(o){ return o.prio===0; }).length;
+                var sCount = lastOrdered.filter(function(o){ return o.prio===1; }).length;
+                var uCount = lastOrdered.filter(function(o){ return o.prio===2; }).length;
+                if (ostats) ostats.innerHTML =
+                    '<span style="color:#3fb950;margin-right:16px">&#9679; Prim\u00e4r: <strong>' + pCount + '</strong></span>' +
+                    '<span style="color:#58a6ff;margin-right:16px">&#9679; Sekund\u00e4r: <strong>' + sCount + '</strong></span>' +
+                    '<span style="color:#666;margin-right:20px">&#9679; \u00dcbrige: <strong>' + uCount + '</strong></span>' +
+                    '<span style="color:#f0a500">Gedruckt wird: <strong>' + escHtml(katLabel) + '</strong> (' + nr + ' Kunden)</span>';
+
+                var overlay = document.getElementById('md-overlay');
+                if (overlay) overlay.style.display = 'flex';
+            };
+
+            window.closeMdOverlay = function() {
+                var overlay = document.getElementById('md-overlay');
+                if (overlay) overlay.style.display = 'none';
+            };
+
             window.printMassendruck = function() {
-                // Alle sichtbaren (nicht durch Kategorie/Suche gefilterten) drucken
-                // DOM ist bereits in Massendruck-Reihenfolge – einfach window.print()
-                var entries = Array.from(document.querySelectorAll('.customer-entry'));
-                var hidden = entries.filter(function(e){ return e.style.display === 'none'; });
-                // Temporär auch gefilterte wieder einblenden für Gesamt-Massendruck
-                hidden.forEach(function(e){ e.setAttribute('data-md-hidden','1'); e.style.display=''; });
+                closeMdOverlay();
+                // Nur die aktuell sichtbare Kategorie drucken (activeKat-Filter bleibt)
+                // DOM ist bereits in Massendruck-Reihenfolge – window.print() druckt was sichtbar ist
                 window.print();
-                hidden.forEach(function(e){ e.style.display='none'; e.removeAttribute('data-md-hidden'); });
             };
 
             document.addEventListener('DOMContentLoaded', function() {
@@ -2024,6 +2156,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     btn.addEventListener('click', function() {
                         applyMassendruck(parseInt(btn.getAttribute('data-day')));
                     });
+                });
+                document.addEventListener('keydown', function(e) {
+                    if (e.key === 'Escape') closeMdOverlay();
                 });
             });
         })();
