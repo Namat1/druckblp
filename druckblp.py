@@ -1620,6 +1620,9 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     <div class="paper">
     <div class="paper-inner">
 
+        <!-- ===== MASSENDRUCK TOUR-BANNER (von JS befüllt) ===== -->
+        <div class="md-tour-banner" data-sap-ref="{html.escape(sap_nr)}" style="display:none"></div>
+
         <!-- ===== HEADER: Adresse | Titel | Logo ===== -->
         <div class="doc-header">
             <div class="doc-address">
@@ -1997,6 +2000,46 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         .md-prio-s { color: #58a6ff; font-weight: 700; }
         .md-prio-u { color: #555; }
         @media print { .md-section, .md-overlay { display: none !important; } }
+        .md-tour-banner {
+            display: flex;
+            align-items: center;
+            gap: 6mm;
+            background: #003366;
+            color: #fff;
+            padding: 2.5mm 4mm 2mm;
+            margin: -14mm -15mm 3mm -15mm; /* bleed to paper edges */
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+        .md-tour-banner .mdb-label {
+            font-size: 7pt;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            opacity: 0.75;
+            flex-shrink: 0;
+        }
+        .md-tour-banner .mdb-tour {
+            font-size: 13pt;
+            font-weight: 900;
+            letter-spacing: 0.04em;
+            font-family: 'Courier New', monospace;
+        }
+        .md-tour-banner .mdb-sep {
+            width: 0.3mm; height: 7mm;
+            background: rgba(255,255,255,0.25);
+            flex-shrink: 0;
+        }
+        .md-tour-banner .mdb-prio {
+            font-size: 7.5pt;
+            font-weight: 700;
+            opacity: 0.85;
+            letter-spacing: 0.06em;
+        }
+        .md-tour-banner.prio-s { background: #0a3d6b; }
+        .md-tour-banner.prio-u { background: #2a2a2a; }
+        @media screen { .md-tour-banner { display: none !important; } }
+        @media print  { .md-tour-banner[style*="display:none"] { display: none !important; }
+                         .md-tour-banner.md-active { display: flex !important; } }
         """
 
         massendruck_js = """
@@ -2083,6 +2126,23 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 var stack = document.querySelector('.page-stack');
                 lastOrdered.forEach(function(o) { stack.appendChild(o.entry); });
                 window._allEntries = lastOrdered.map(function(o) { return o.entry; });
+
+                // Tour-Banner auf jedem Blatt befüllen
+                lastOrdered.forEach(function(o) {
+                    var banner = o.entry.querySelector('.md-tour-banner');
+                    if (!banner) return;
+                    var tour    = o.pt || o.st || '';
+                    var prioTxt = o.prio===0 ? 'Primärtour' : (o.prio===1 ? 'Sekundärtour' : 'Keine Tour');
+                    banner.className = 'md-tour-banner md-active' +
+                        (o.prio===1 ? ' prio-s' : o.prio===2 ? ' prio-u' : '');
+                    banner.innerHTML = tour
+                        ? '<span class="mdb-label">CSB-Tour</span>' +
+                          '<span class="mdb-tour">' + escHtml(tour) + '</span>' +
+                          '<span class="mdb-sep"></span>' +
+                          '<span class="mdb-prio">' + escHtml(prioTxt) + '</span>'
+                        : '<span class="mdb-label">Keine Normalwoche-Tour</span>' +
+                          '<span class="mdb-prio" style="opacity:0.5">Übrige</span>';
+                });
 
                 // Zählungen (alle, unabhängig von Kategorie-Filter)
                 var pCount = lastOrdered.filter(function(o){ return o.prio===0; }).length;
