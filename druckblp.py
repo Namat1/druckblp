@@ -956,29 +956,15 @@ def show_massendruck_section(
     logo_b64: str,
     logo_mime: str,
     csv_separator: str,
+    sw_sap_file,
+    sw_kisoft_file,
 ) -> None:
     """Rendert den kompletten Massendruck-Bereich in der Streamlit-App."""
     st.divider()
     st.subheader("🖨️ Massendruck")
 
-    col_sw1, col_sw2 = st.columns(2, gap="medium")
-    with col_sw1:
-        sw_sap_file = st.file_uploader(
-            "SAP Standardwoche",
-            type=["xlsx", "xls", "xlsm", "csv"],
-            key="sw_sap",
-            help="SAP-Datei der Referenzwoche – bestimmt Liefertag-Zuordnung für die Sortierung",
-        )
-    with col_sw2:
-        sw_kisoft_file = st.file_uploader(
-            "Kisoft Standardwoche",
-            type=["csv", "xlsx", "xls", "xlsm"],
-            key="sw_kisoft",
-            help="Kisoft-Datei der Referenzwoche – liefert CSB-Tournummern für die Sortierung",
-        )
-
     if not sw_sap_file or not sw_kisoft_file:
-        st.info("SAP- und Kisoft-Standardwoche hochladen um den Massendruck zu konfigurieren.")
+        st.info("SAP- und Kisoft-Standardwoche hochladen (rechte Spalte oben) um den Massendruck zu konfigurieren.")
         return
 
     # Standardwoche verarbeiten (gecacht)
@@ -2644,7 +2630,7 @@ def main() -> None:
     st.title("📦 Sendeplan-Generator")
 
     # ── Uploads ──
-    col_left, col_right = st.columns(2, gap="medium")
+    col_left, col_mid, col_right = st.columns(3, gap="medium")
     with col_left:
         kunden_file = st.file_uploader("Kundenliste", type=["xlsx", "xls", "xlsm", "csv"],
                                         help="Spalten: A, I, J, K, L, M, N")
@@ -2652,13 +2638,27 @@ def main() -> None:
                                      help="Spalten: A, G, H, I, O, Y")
         transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
                                           help="Spalten: A, C")
-    with col_right:
+    with col_mid:
         kisoft_file = st.file_uploader("Kisoft-Datei", type=["csv", "xlsx", "xls", "xlsm"],
                                         help="SAP Rahmentour, CSB Tournummer, Verladetor")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                               help="A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter")
         logo_file = st.file_uploader("Logo (optional)", type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
                                       help="Oben rechts auf jedem Sendeplan")
+    with col_right:
+        st.markdown("**Massendruck – Standardwoche**")
+        sw_sap_file = st.file_uploader(
+            "SAP Standardwoche",
+            type=["xlsx", "xls", "xlsm", "csv"],
+            key="sw_sap",
+            help="SAP-Referenzwoche für Liefertag-Sortierung",
+        )
+        sw_kisoft_file = st.file_uploader(
+            "Kisoft Standardwoche",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            key="sw_kisoft",
+            help="Kisoft-Referenzwoche für CSB-Tournummern",
+        )
 
     upload_map = {
         "kunden": kunden_file, "sap": sap_file, "transport": transport_file,
@@ -2759,6 +2759,8 @@ def main() -> None:
         logo_b64=logo_b64,
         logo_mime=logo_mime,
         csv_separator=csv_separator,
+        sw_sap_file=sw_sap_file,
+        sw_kisoft_file=sw_kisoft_file,
     )
 
 
