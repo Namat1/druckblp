@@ -1927,7 +1927,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
             function computeOrder(primaryDay) {
                 var secondaryDay = (primaryDay % 6) + 1;
-                var ordered = allEntries.map(function(entry) {
+                var entries = window._allEntries || Array.from(document.querySelectorAll('.customer-entry'));
+                var ordered = entries.map(function(entry) {
                     var sap = (entry.getAttribute('data-sap') || '').trim();
                     var name = entry.getAttribute('data-name') || '';
                     var asgn = MD.assignments[sap] || {};
@@ -1953,7 +1954,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 // DOM-Reihenfolge anpassen
                 var stack = document.querySelector('.page-stack');
                 ordered.forEach(function(o) { stack.appendChild(o.entry); });
-                allEntries = ordered.map(function(o) { return o.entry; });
+
+                // window._allEntries synchronisieren damit Such-IIFE korrekte Reihenfolge hat
+                window._allEntries = ordered.map(function(o) { return o.entry; });
 
                 // Zählungen
                 var pCount = ordered.filter(function(o){ return o.prio===0; }).length;
@@ -2250,6 +2253,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         document.addEventListener("DOMContentLoaded", function () {
             allEntries = Array.from(document.querySelectorAll(".customer-entry"));
+            window._allEntries = allEntries;  // für Massendruck-IIFE sichtbar
 
             // Debounce: bei schnellem Tippen nicht bei jedem Tastendruck filtern
             var _searchTimer = null;
