@@ -1620,9 +1620,6 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
     <div class="paper">
     <div class="paper-inner">
 
-        <!-- ===== MASSENDRUCK TOUR-BANNER (von JS befüllt) ===== -->
-        <div class="md-tour-banner" data-sap-ref="{html.escape(sap_nr)}" style="display:none"></div>
-
         <!-- ===== HEADER: Adresse | Titel | Logo ===== -->
         <div class="doc-header">
             <div class="doc-address">
@@ -1646,6 +1643,7 @@ def render_customer_plan(customer: pd.Series, customer_rows: pd.DataFrame, logo_
             <span><strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}</span>
             <span><strong>Fachberater:</strong> {html.escape(fachberater)}</span>
             <span><strong>Stand:</strong> {html.escape(stand)}</span>
+            <span class="md-tour-inline" style="display:none"></span>
         </div>
 
         <!-- ===== TOUR-ÜBERSICHT ===== -->
@@ -2000,21 +1998,15 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         .md-prio-s { color: #58a6ff; font-weight: 700; }
         .md-prio-u { color: #555; }
         @media print { .md-section, .md-overlay { display: none !important; } }
-        .md-tour-banner {
-            text-align: left;
-            background: none;
-            color: #ccc;
-            padding: 4mm 0 2mm 6mm;
-            margin: -6mm -15mm 3mm -15mm;
+        .md-tour-inline {
             font-family: 'Courier New', monospace;
-            font-size: 11pt;
-            font-weight: 900;
-            letter-spacing: 0.1em;
-            border-bottom: 0.5mm solid #eee;
+            font-size: 9pt;
+            font-weight: 700;
+            color: #bbb;
+            letter-spacing: 0.06em;
+            margin-left: auto;
         }
-        @media screen { .md-tour-banner { display: none !important; } }
-        @media print  { .md-tour-banner[style*="display:none"] { display: none !important; }
-                         .md-tour-banner.md-active { display: block !important; } }
+        @media screen { .md-tour-inline { display: none !important; } }
         """
 
         massendruck_js = """
@@ -2102,14 +2094,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 lastOrdered.forEach(function(o) { stack.appendChild(o.entry); });
                 window._allEntries = lastOrdered.map(function(o) { return o.entry; });
 
-                // Tour-Banner auf jedem Blatt befüllen
+                // Tour-Nummer in Infoleiste eintragen
                 lastOrdered.forEach(function(o) {
-                    var banner = o.entry.querySelector('.md-tour-banner');
-                    if (!banner) return;
+                    var span = o.entry.querySelector('.md-tour-inline');
+                    if (!span) return;
                     var tour = o.pt || o.st || '';
-                    banner.className = 'md-tour-banner md-active';
-                    banner.style.display = '';  // Inline-style entfernen damit Print-CSS greift
-                    banner.textContent = tour;
+                    span.style.display = '';
+                    span.textContent = tour ? 'Tour: ' + tour : '';
                 });
 
                 // Zählungen (alle, unabhängig von Kategorie-Filter)
