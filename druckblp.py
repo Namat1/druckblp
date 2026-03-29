@@ -1813,7 +1813,7 @@ def render_export_search_toolbar(massendruck_section: str = "", logo_b64: str = 
     """
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, logo_b64: str = "", logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None) -> str:
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, logo_b64: str = "", logo_mime: str = "image/png", sidebar_logo_b64: str = "", sidebar_logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None) -> str:
     # Logo einmalig als JS-Variable – wird nach DOMContentLoaded auf alle Bilder gesetzt.
     # Spart mehrere MB bei größeren Kundenstämmen (logo_b64 × N Kunden).
     if logo_b64:
@@ -2748,7 +2748,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         {logo_head_script}
     </head>
     <body>
-        {render_export_search_toolbar(massendruck_sidebar_section, logo_b64=logo_b64, logo_mime=logo_mime)}
+        {render_export_search_toolbar(massendruck_sidebar_section, logo_b64=sidebar_logo_b64, logo_mime=sidebar_logo_mime)}
         <div class="main-content">
         <div class="page-stack">
         {''.join(docs)}
@@ -3061,7 +3061,8 @@ def main() -> None:
         st.session_state["_debug_cache_key"] = _data_key
     debug_reports = st.session_state["_debug_reports"]
 
-    # ── Logo vorbereiten ──
+    # ── Logos vorbereiten ──
+    # Druck-Logo: erscheint oben rechts auf jedem A4-Sendeplan
     logo_b64 = ""
     logo_mime = "image/png"
     if logo_file is not None:
@@ -3069,6 +3070,15 @@ def main() -> None:
         ext = logo_file.name.rsplit(".", 1)[-1].lower()
         logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                      "svg": "image/svg+xml", "gif": "image/gif", "webp": "image/webp"}.get(ext, "image/png")
+
+    # Sidebar-Logo: erscheint im HTML-Seitenleisten-Header
+    sidebar_logo_b64 = ""
+    sidebar_logo_mime = "image/png"
+    if app_logo_file is not None:
+        sidebar_logo_b64 = base64.b64encode(app_logo_file.getvalue()).decode("utf-8")
+        ext2 = app_logo_file.name.rsplit(".", 1)[-1].lower()
+        sidebar_logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                             "svg": "image/svg+xml", "gif": "image/gif", "webp": "image/webp"}.get(ext2, "image/png")
 
     # ── Massendruck-Daten vorbereiten (gecacht) ──
     md_data = None
@@ -3118,6 +3128,7 @@ def main() -> None:
                     customers_df, plan_rows_df,
                     include_separators=include_sep,
                     logo_b64=logo_b64, logo_mime=logo_mime,
+                    sidebar_logo_b64=sidebar_logo_b64, sidebar_logo_mime=sidebar_logo_mime,
                     debug_data=debug_reports,
                     massendruck_data=md_data,
                 )
