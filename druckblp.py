@@ -2913,15 +2913,14 @@ def main() -> None:
     init_session_state()
     st.markdown(streamlit_css(), unsafe_allow_html=True)
 
-    # ── App-Header mit Logo-Upload ──
+    # ── App-Header ──
     h_left, h_right = st.columns([1, 3], gap="medium")
     with h_left:
         app_logo_file = st.file_uploader(
-            "Logo hochladen",
+            "App-Logo",
             type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
             key="app_logo",
-            label_visibility="collapsed",
-            help="Logo für die App-Kopfzeile und jeden gedruckten Sendeplan",
+            help="Logo für die App-Kopfzeile (wird nicht gedruckt)",
         )
         if app_logo_file is not None:
             st.image(app_logo_file, use_container_width=True)
@@ -2930,7 +2929,7 @@ def main() -> None:
                 """
                 <div style="border:2px dashed #30363d; border-radius:10px; padding:18px 12px;
                             text-align:center; color:#888; font-size:0.8rem; line-height:1.5;">
-                    📷<br>Logo hochladen<br><span style="font-size:0.7rem;color:#555">PNG · JPG · SVG</span>
+                    📷<br>App-Logo<br><span style="font-size:0.7rem;color:#555">PNG · JPG · SVG</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -2971,7 +2970,12 @@ def main() -> None:
                                         help="SAP Rahmentour, CSB Tournummer, Verladetor")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                               help="A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter")
-        logo_file = app_logo_file  # dasselbe Logo aus dem Header verwenden
+        logo_file = st.file_uploader(
+            "Druck-Logo (Sendeplan)",
+            type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
+            key="print_logo",
+            help="Logo oben rechts auf jedem gedruckten Sendeplan (unabhängig vom App-Logo)",
+        )
     with col_right:
         st.markdown("**📅 Massendruck – Standardwoche** *(optional)*")
         st.caption("Liefert Toursortiering für den Massendruck im HTML-Export.")
