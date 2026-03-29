@@ -2095,101 +2095,108 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 return btn ? (btn.getAttribute('data-kat') || 'alle') : 'alle';
             }
 
-            // Ermittelt den nächsten Tag (1-6 zyklisch) der mindestens einen
-            // Kunden der aktuell aktiven Kategorie mit einer Tour-Zuweisung hat.
-            function nextDeliveryDay(primaryDay) {
-                var activeKat = getActiveKat();
-
-                // Alle customer-entry-Elemente nach Kategorie vorfiltern
-                var entries = window._allEntries || Array.from(document.querySelectorAll('.customer-entry'));
-
-                // Tage ermitteln die für die aktive Kategorie Zuweisungen haben
-                var daysWithTours = {};
-                var asgns = MD.assignments;
-                entries.forEach(function(entry) {
-                    var kat = entry.getAttribute('data-kategorie') || '';
-                    var ohnecsb = entry.getAttribute('data-ohne-csb') === '1';
-                    var katOk = activeKat === 'alle' || kat === activeKat ||
-                                (activeKat === 'ohne-csb' && ohnecsb);
-                    if (!katOk) return;
-                    var sap = (entry.getAttribute('data-sap') || '').trim();
-                    var days = asgns[sap] || {};
-                    for (var d in days) {
-                        if (days[d]) daysWithTours[d] = true;
-                    }
-                });
-
-                // Zyklisch von primaryDay+1 durch alle 6 Wochentage
-                for (var i = 1; i <= 6; i++) {
-                    var candidate = ((primaryDay - 1 + i) % 6) + 1;
-                    if (candidate !== primaryDay && daysWithTours[String(candidate)]) {
-                        return candidate;
-                    }
-                }
-                // Fallback: nächster Kalendertag
-                return (primaryDay % 6) + 1;
-            }
-
             function computeOrder(primaryDay) {
-                var secondaryDay = nextDeliveryDay(primaryDay);
                 var entries = window._allEntries || Array.from(document.querySelectorAll('.customer-entry'));
                 var ordered = entries.map(function(entry) {
-                    var sap = (entry.getAttribute('data-sap') || '').trim();
-                    var name = entry.getAttribute('data-name') || '';
-                    var kat  = entry.getAttribute('data-kategorie') || '';
-                    var sap_display = entry.getAttribute('data-sap') || '';
-                    var asgn = MD.assignments[sap] || {};
-                    var pt = asgn[String(primaryDay)] || '';
-                    var st = asgn[String(secondaryDay)] || '';
-                    var prio = pt ? 0 : (st ? 1 : 2);
+                    var sap    = (entry.getAttribute('data-sap') || '').trim();
+                    var name   = entry.getAttribute('data-name') || '';
+                    var kat    = entry.getAttribute('data-kategorie') || '';
+                    var asgn   = MD.assignments[sap] || {};
+                    var pt     = asgn[String(primaryDay)] || '';
+
+                    // Pro Kunde: alle restlichen Tage zyklisch durchsuchen bis Tour gefunden
+                    var st = ''; var stDay = null;
+                    if (!pt) {
+                        for (var i = 1; i <= 5; i++) {
+                            var candidate = ((primaryDay - 1 + i) % 6) + 1;
+                            if (asgn[String(candidate)]) {
+                                st    = asgn[String(candidate)];
+                                stDay = candidate;
+                                break;
+                            }
+                        }
+                    }
+
+                    var prio       = pt ? 0 : (st ? 1 : 2);
                     var tourDigits = (pt || st || '').replace(/\\D/g,'').padStart(8,'0');
-                    return { entry: entry, pt: pt, st: st, prio: prio, name: name,
-                             kat: kat, sap: sap_display,
-                             key: prio + tourDigits + name };
+                    return {
+                        entry: entry, pt: pt, st: st, stDay: stDay,
+                        prio: prio, name: name, kat: kat,
+                        sap: entry.getAttribute('data-sap') || '',
+                        key: prio + tourDigits + name
+                    };
                 });
-                ordered.sort(function(a,b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+                ordered.sort(function(a,b){ return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
                 return ordered;
             }
 
-            function buildTable(ordered, pdName, sdName) {
+            // Filtert ordered nach aktiver Kategorie
+            function filterByKat(ordered) {
+                var activeKat = getActiveKat();
+                return ordered.filter(function(o) {
+                    var ohnecsb = o.entry.getAttribute('data-ohne-csb') === '1';
+                    return activeKat === 'alle' || o.kat === activeKat ||
+                           (activeKat === 'ohne-csb' && ohnecsb);
+                });
+            }
+
+            // Erstellt Statistik-HTML für die Sidebar (nur gefilterte Kunden)
+            function buildStatsHtml(filtered, pdName) {
+                var pCount = 0, uCount = 0;
+                var sByDay = {};   // { dayNum: { name, count } }
+                filtered.forEach(function(o) {
+                    if (o.prio === 0) { pCount++; }
+                    else if (o.prio === 1) {
+                        var d = String(o.stDay);
+                        if (!sByDay[d]) sByDay[d] = { name: MD.days[d] || ('Tag ' + d), count: 0 };
+                        sByDay[d].count++;
+                    } else { uCount++; }
+                });
+                var html = '<span style="color:#1a7f3c">&#9679; Prim\u00e4r (' + escHtml(pdName) + '): <strong>' + pCount + '</strong></span><br>';
+                // Sekundärtage aufsteigend sortiert ausgeben
+                var sDays = Object.keys(sByDay).sort(function(a,b){ return parseInt(a)-parseInt(b); });
+                sDays.forEach(function(d) {
+                    var sName = sByDay[d].name;
+                    // Wochentag relativ zum Primärtag einrücken: nahe = blau, weit = grau
+                    html += '<span style="color:#1a60b0">&nbsp;&nbsp;&#8627; Sekund\u00e4r ' + escHtml(sName) + ': <strong>' + sByDay[d].count + '</strong></span><br>';
+                });
+                html += '<span style="color:#9a9a9a">&#9679; Keine Tour: <strong>' + uCount + '</strong></span>';
+                return html;
+            }
+
+            function buildTable(ordered, pdName) {
                 var thP = document.getElementById('md-th-p');
                 var thS = document.getElementById('md-th-s');
                 if (thP) thP.textContent = pdName.slice(0,2) + '-Tour (Prim\u00e4r)';
-                if (thS) thS.textContent = sdName.slice(0,2) + '-Tour (Sekund\u00e4r)';
+                if (thS) thS.textContent = 'Sekund\u00e4r-Tour (Tag)';
 
-                var activeKat = getActiveKat();
+                var filtered = filterByKat(ordered);
                 var tbody = document.getElementById('md-table-body');
                 tbody.innerHTML = '';
-                var nr = 0;
-                ordered.forEach(function(o) {
-                    var katOk = activeKat === 'alle' || o.kat === activeKat ||
-                                (activeKat === 'ohne-csb' && o.entry.getAttribute('data-ohne-csb') === '1');
-                    if (!katOk) return;
-                    nr++;
-                    var prioLabel = o.prio===0
+                filtered.forEach(function(o, i) {
+                    var prioLabel = o.prio === 0
                         ? '<span class="md-prio-p">Prim\u00e4r</span>'
-                        : o.prio===1
-                            ? '<span class="md-prio-s">Sekund\u00e4r</span>'
+                        : o.prio === 1
+                            ? '<span class="md-prio-s">Sek. ' + escHtml(MD.days[String(o.stDay)] || '') + '</span>'
                             : '<span class="md-prio-u">\u00dcbrig</span>';
+                    var stCell = o.st ? (escHtml(o.st) + ' <span style="color:#aab2be;font-size:10px">(' + escHtml((MD.days[String(o.stDay)]||'').slice(0,2)) + ')</span>') : '';
                     var tr = document.createElement('tr');
                     tr.innerHTML =
-                        '<td style="color:#555;text-align:right;padding-right:8px">' + nr + '</td>' +
-                        '<td style="font-weight:600;color:#e0e0e0">' + escHtml(o.name) + '</td>' +
-                        '<td style="font-family:monospace;font-size:11px;color:#888">' + escHtml(o.sap) + '</td>' +
-                        '<td style="font-size:11px;color:#aaa">' + escHtml(o.kat) + '</td>' +
-                        '<td class="md-tour" style="color:#f0a500">' + escHtml(o.pt) + '</td>' +
-                        '<td class="md-tour" style="color:#58a6ff">' + escHtml(o.st) + '</td>' +
+                        '<td style="color:#6b7a90;text-align:right;padding-right:8px">' + (i+1) + '</td>' +
+                        '<td style="font-weight:600;color:#1a2332">' + escHtml(o.name) + '</td>' +
+                        '<td style="font-family:monospace;font-size:11px;color:#6b7a90">' + escHtml(o.sap) + '</td>' +
+                        '<td style="font-size:11px;color:#4a5568">' + escHtml(o.kat) + '</td>' +
+                        '<td class="md-tour" style="color:#b07800">' + escHtml(o.pt) + '</td>' +
+                        '<td class="md-tour">' + stCell + '</td>' +
                         '<td>' + prioLabel + '</td>';
                     tbody.appendChild(tr);
                 });
-                return nr;
+                return filtered.length;
             }
 
             function applyMassendruck(primaryDay) {
                 activeMdDay = primaryDay;
-                var secondaryDay = nextDeliveryDay(primaryDay);
                 var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
-                var sdName = MD.days[String(secondaryDay)] || ('Tag ' + secondaryDay);
 
                 lastOrdered = computeOrder(primaryDay);
 
@@ -2198,7 +2205,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 lastOrdered.forEach(function(o) { stack.appendChild(o.entry); });
                 window._allEntries = lastOrdered.map(function(o) { return o.entry; });
 
-                // Tour-Nummer in Infoleiste eintragen
+                // Tour-Nummer in Infoleiste (Druckansicht) eintragen
                 lastOrdered.forEach(function(o) {
                     var span = o.entry.querySelector('.md-tour-inline');
                     if (!span) return;
@@ -2207,22 +2214,15 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     span.textContent = tour ? 'Tour: ' + tour : '';
                 });
 
-                // Zählungen (alle, unabhängig von Kategorie-Filter)
-                var pCount = lastOrdered.filter(function(o){ return o.prio===0; }).length;
-                var sCount = lastOrdered.filter(function(o){ return o.prio===1; }).length;
-                var uCount = lastOrdered.filter(function(o){ return o.prio===2; }).length;
-
+                // Statistik NUR für aktive Kategorie
+                var filtered = filterByKat(lastOrdered);
                 var activeKat = getActiveKat();
-                var katLabel = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
+                var katLabel  = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
 
-                // Sidebar-Statistik
                 var stats = document.getElementById('md-stats');
                 stats.style.display = '';
-                stats.innerHTML =
-                    '<span style="color:#3fb950">&#9679; Prim\u00e4r (' + escHtml(pdName) + '): <strong>' + pCount + '</strong></span><br>' +
-                    '<span style="color:#58a6ff">&#9679; Sekund\u00e4r (' + escHtml(sdName) + '): <strong>' + sCount + '</strong></span><br>' +
-                    '<span style="color:#666">&#9679; \u00dcbrige: <strong>' + uCount + '</strong></span><br>' +
-                    '<span style="color:#f0a500;font-size:9px">Druck: ' + escHtml(katLabel) + '</span>';
+                stats.innerHTML = buildStatsHtml(filtered, pdName) +
+                    '<br><span style="color:#9a6800;font-size:9px">Druck: ' + escHtml(katLabel) + ' (' + filtered.length + ' Kunden)</span>';
 
                 var row = document.getElementById('md-btn-row');
                 if (row) row.style.display = '';
@@ -2236,27 +2236,19 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             window.openMdOverlay = function() {
                 if (activeMdDay === null) return;
                 var primaryDay = activeMdDay;
-                var secondaryDay = nextDeliveryDay(primaryDay);
-                var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
-                var sdName = MD.days[String(secondaryDay)] || ('Tag ' + secondaryDay);
+                var pdName   = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
                 var activeKat = getActiveKat();
-                var katLabel = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
+                var katLabel  = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
 
                 var title = document.getElementById('md-overlay-title');
-                if (title) title.textContent =
-                    'Druckreihenfolge \u2013 ' + pdName + ' (Prim\u00e4r) / ' + sdName + ' (Sekund\u00e4r)';
+                if (title) title.textContent = 'Druckreihenfolge \u2013 Prim\u00e4rtag: ' + pdName;
 
-                var nr = buildTable(lastOrdered, pdName, sdName);
+                var nr = buildTable(lastOrdered, pdName);
 
+                var filtered = filterByKat(lastOrdered);
                 var ostats = document.getElementById('md-overlay-stats');
-                var pCount = lastOrdered.filter(function(o){ return o.prio===0; }).length;
-                var sCount = lastOrdered.filter(function(o){ return o.prio===1; }).length;
-                var uCount = lastOrdered.filter(function(o){ return o.prio===2; }).length;
-                if (ostats) ostats.innerHTML =
-                    '<span style="color:#3fb950;margin-right:16px">&#9679; Prim\u00e4r: <strong>' + pCount + '</strong></span>' +
-                    '<span style="color:#58a6ff;margin-right:16px">&#9679; Sekund\u00e4r: <strong>' + sCount + '</strong></span>' +
-                    '<span style="color:#666;margin-right:20px">&#9679; \u00dcbrige: <strong>' + uCount + '</strong></span>' +
-                    '<span style="color:#f0a500">Gedruckt wird: <strong>' + escHtml(katLabel) + '</strong> (' + nr + ' Kunden)</span>';
+                if (ostats) ostats.innerHTML = buildStatsHtml(filtered, pdName) +
+                    '&nbsp;&nbsp;<span style="color:#9a6800">Gedruckt wird: <strong>' + escHtml(katLabel) + '</strong> (' + nr + ' Kunden)</span>';
 
                 var overlay = document.getElementById('md-overlay');
                 if (overlay) overlay.style.display = 'flex';
