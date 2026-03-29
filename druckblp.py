@@ -857,12 +857,15 @@ def build_day_assignments(
     sw_kisoft_bytes: bytes,
     sw_kisoft_name: str,
     csv_separator: str,
-) -> pd.DataFrame:
+) -> dict:
     """Erstellt Tages-Touren-Zuordnung aus Standardwoche SAP + Kisoft.
 
-    Rückgabe: DataFrame mit Spalten
-        SAP_Nr | Liefertag_Num (1-6) | Liefertag_Name | CSB_Tournummer
+    Rückgabe: dict  { sap_nr: { "1": "1004", "3": "3007", ... }, ... }
+    Schlüssel im inneren Dict = Liefertag als String ("1"=Mo … "6"=Sa).
+    Wird als JSON in die HTML eingebettet – clientseitige JS-Logik übernimmt Sortierung.
     """
+    import json as _json
+
     df_sap = load_structured_upload(sw_sap_bytes, sw_sap_name, csv_separator, "sap")
     df_kisoft = load_kisoft_upload(sw_kisoft_bytes, sw_kisoft_name, csv_separator)
 
@@ -881,208 +884,23 @@ def build_day_assignments(
         how="left",
     )
     df_merged["CSB Tournummer"] = df_merged["CSB Tournummer"].fillna("").map(normalize_text)
-    df_merged["Liefertag_Name"] = df_merged["Liefertag_Num"].map(
-        lambda n: WOCHENTAGE.get(n, "Unbekannt")
-    )
 
-    # Pro Kunde + Liefertag eine Zeile – erste/niedrigste CSB-Tour
-    df_assignments = (
-        df_merged[df_merged["Liefertag_Num"].between(1, 6)]
-        [["SAP_Nr", "Liefertag_Num", "Liefertag_Name", "CSB Tournummer"]]
+    df_clean = (
+        df_merged[df_merged["Liefertag_Num"].between(1, 6) & (df_merged["CSB Tournummer"] != "")]
+        [["SAP_Nr", "Liefertag_Num", "CSB Tournummer"]]
         .sort_values(["SAP_Nr", "Liefertag_Num", "CSB Tournummer"])
         .drop_duplicates(subset=["SAP_Nr", "Liefertag_Num"])
-        .reset_index(drop=True)
-    )
-    return df_assignments
-
-
-def sort_customers_massendruck(
-    customers_df: pd.DataFrame,
-    day_assignments: pd.DataFrame,
-    primary_day: int,
-) -> Tuple[pd.DataFrame, int]:
-    """Sortiert Kunden für den Massendruck nach Primär- und Sekundärtag.
-
-    primary_day: 1–6 (1=Mo … 6=Sa)
-    Sekundärtag = Folgetag (6 → 1).
-
-    Gibt zurück: (sortiertes customers_df mit Zusatzspalten, secondary_day_num)
-    Zusatzspalten: PrimaerTour, SekundaerTour, _prioritaet, _druckreihenfolge
-    """
-    secondary_day = (primary_day % 6) + 1  # 1→2, 2→3, …, 6→1
-
-    primary_df = (
-        day_assignments[day_assignments["Liefertag_Num"] == primary_day]
-        [["SAP_Nr", "CSB Tournummer"]]
-        .rename(columns={"CSB Tournummer": "PrimaerTour"})
-    )
-    secondary_df = (
-        day_assignments[day_assignments["Liefertag_Num"] == secondary_day]
-        [["SAP_Nr", "CSB Tournummer"]]
-        .rename(columns={"CSB Tournummer": "SekundaerTour"})
     )
 
-    result = customers_df.copy()
-    result = result.merge(primary_df, on="SAP_Nr", how="left")
-    result = result.merge(secondary_df, on="SAP_Nr", how="left")
-    result["PrimaerTour"]   = result.get("PrimaerTour",   pd.Series("", index=result.index)).fillna("")
-    result["SekundaerTour"] = result.get("SekundaerTour", pd.Series("", index=result.index)).fillna("")
+    result: dict = {}
+    for _, row in df_clean.iterrows():
+        sap = normalize_text(row["SAP_Nr"])
+        day = str(int(row["Liefertag_Num"]))
+        csb = normalize_text(row["CSB Tournummer"])
+        if sap:
+            result.setdefault(sap, {})[day] = csb
 
-    def _sort_key(row: pd.Series) -> tuple:
-        pt = normalize_digits(row["PrimaerTour"])
-        st_ = normalize_digits(row["SekundaerTour"])
-        if row["PrimaerTour"]:
-            return (0, pt.zfill(8), normalize_text(row.get("Name", "")))
-        elif row["SekundaerTour"]:
-            return (1, st_.zfill(8), normalize_text(row.get("Name", "")))
-        else:
-            return (2, "", normalize_text(row.get("Name", "")))
-
-    result["_sort_tuple"] = result.apply(_sort_key, axis=1)
-    result = result.sort_values("_sort_tuple").reset_index(drop=True)
-    result["_prioritaet"] = result.apply(
-        lambda r: "Primär" if r["PrimaerTour"] else ("Sekundär" if r["SekundaerTour"] else "Übrige"),
-        axis=1,
-    )
-    result["_druckreihenfolge"] = range(1, len(result) + 1)
-    result = result.drop(columns=["_sort_tuple"])
-    return result, secondary_day
-
-
-def show_massendruck_section(
-    customers_df: pd.DataFrame,
-    plan_rows_df: pd.DataFrame,
-    debug_reports: Dict[str, pd.DataFrame],
-    logo_b64: str,
-    logo_mime: str,
-    csv_separator: str,
-    sw_sap_file,
-    sw_kisoft_file,
-) -> None:
-    """Rendert den kompletten Massendruck-Bereich in der Streamlit-App."""
-    st.divider()
-    st.subheader("🖨️ Massendruck")
-
-    if not sw_sap_file or not sw_kisoft_file:
-        st.info("SAP- und Kisoft-Standardwoche hochladen (rechte Spalte oben) um den Massendruck zu konfigurieren.")
-        return
-
-    # Standardwoche verarbeiten (gecacht)
-    try:
-        _sw_key = hashlib.md5(sw_sap_file.getvalue() + sw_kisoft_file.getvalue()).hexdigest()
-        if st.session_state.get("_sw_cache_key") != _sw_key:
-            _day_assignments = build_day_assignments(
-                sw_sap_file.getvalue(), sw_sap_file.name,
-                sw_kisoft_file.getvalue(), sw_kisoft_file.name,
-                csv_separator,
-            )
-            st.session_state["_sw_cache_key"]    = _sw_key
-            st.session_state["_day_assignments"] = _day_assignments
-            st.session_state["_massendruck_ready"] = False
-        day_assignments: pd.DataFrame = st.session_state["_day_assignments"]
-    except Exception as exc:
-        st.error(f"Fehler beim Verarbeiten der Standardwoche: {exc}")
-        return
-
-    # Tag-Auswahl
-    tag_names = list(WOCHENTAGE.values())  # ["Montag", "Dienstag", …, "Samstag"]
-    tag_name_to_num = {v: k for k, v in WOCHENTAGE.items()}
-
-    selected_tag_name = st.radio(
-        "Primärer Drucktag (Sortierung)",
-        tag_names,
-        horizontal=True,
-        key="md_primary_tag",
-    )
-    primary_day_num   = tag_name_to_num[selected_tag_name]
-    secondary_day_num = (primary_day_num % 6) + 1
-    secondary_tag_name = WOCHENTAGE[secondary_day_num]
-
-    st.caption(
-        f"Primär: **{selected_tag_name}** · Sekundär: **{secondary_tag_name}** · "
-        "Übrige Kunden folgen alphabetisch am Ende."
-    )
-
-    # Sortierung berechnen
-    sorted_customers, _ = sort_customers_massendruck(customers_df, day_assignments, primary_day_num)
-
-    prim_count   = int((sorted_customers["_prioritaet"] == "Primär").sum())
-    sek_count    = int((sorted_customers["_prioritaet"] == "Sekundär").sum())
-    uebrig_count = int((sorted_customers["_prioritaet"] == "Übrige").sum())
-
-    st.markdown(
-        f"**{len(sorted_customers)} Kunden** · "
-        f"🟢 Primär ({selected_tag_name}): {prim_count} · "
-        f"🔵 Sekundär ({secondary_tag_name}): {sek_count} · "
-        f"⚪ Übrige: {uebrig_count}"
-    )
-
-    # Vorschau-Tabelle
-    preview_df = sorted_customers[[
-        "_druckreihenfolge", "Name", "SAP_Nr", "Kategorie",
-        "PrimaerTour", "SekundaerTour", "_prioritaet",
-    ]].copy()
-    preview_df.columns = [
-        "Nr.", "Kundenname", "SAP-Nr", "Kategorie",
-        f"Primärtour ({selected_tag_name})",
-        f"Sekundärtour ({secondary_tag_name})",
-        "Priorität",
-    ]
-
-    # Priorität farblich hervorheben – als Streamlit-DataFrame mit column_config
-    st.dataframe(
-        preview_df,
-        use_container_width=True,
-        hide_index=True,
-        height=420,
-        column_config={
-            "Nr.": st.column_config.NumberColumn(width="small"),
-            "Priorität": st.column_config.TextColumn(width="small"),
-        },
-    )
-
-    # Massendruck generieren
-    _md_tag_state_key = f"_md_tag_{primary_day_num}"
-    if st.session_state.get("_md_last_tag") != _md_tag_state_key:
-        st.session_state["_massendruck_ready"] = False
-        st.session_state["_md_last_tag"] = _md_tag_state_key
-
-    if st.button(
-        f"🖨️ Massendruck {selected_tag_name} generieren",
-        use_container_width=True,
-        type="primary",
-        key="btn_massendruck",
-    ):
-        # Hilfsspalten vor dem HTML-Build entfernen
-        clean_customers = sorted_customers.drop(
-            columns=["PrimaerTour", "SekundaerTour", "_prioritaet", "_druckreihenfolge"],
-            errors="ignore",
-        )
-        with st.spinner(f"Generiere Massendruck für {len(clean_customers)} Kunden …"):
-            bulk_html = build_full_document_html(
-                clean_customers,
-                plan_rows_df,
-                logo_b64=logo_b64,
-                logo_mime=logo_mime,
-                debug_data=debug_reports,
-            )
-        st.session_state["_massendruck_html"]  = bulk_html
-        st.session_state["_massendruck_ready"] = True
-
-    if st.session_state.get("_massendruck_ready"):
-        fname = f"massendruck_{selected_tag_name.lower()}.html"
-        st.download_button(
-            label=f"⬇  {fname} herunterladen",
-            data=st.session_state["_massendruck_html"],
-            file_name=fname,
-            mime="text/html",
-            use_container_width=True,
-            key="dl_massendruck",
-        )
-        st.caption(
-            f"HTML im Browser öffnen → Kunden sind nach {selected_tag_name}/{secondary_tag_name}-Touren sortiert. "
-            "Alle Filter und die Druckfunktion sind verfügbar."
-        )
+    return result
 
 
 def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
@@ -1861,7 +1679,7 @@ def render_separator_page(customer: pd.Series) -> str:
     """
 
 
-def render_export_search_toolbar() -> str:
+def render_export_search_toolbar(massendruck_section: str = "") -> str:
     return """
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-logo">
@@ -1921,13 +1739,15 @@ def render_export_search_toolbar() -> str:
             </div>
         </div>
 
+        """ + massendruck_section + """
+
         <button type="button" class="sidebar-print-btn" onclick="printCurrent()">&#128438; Drucken</button>
         <button type="button" class="sidebar-debug-btn" onclick="toggleDebug()">&#128269; Debug</button>
     </aside>
     """
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None) -> str:
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = True, logo_b64: str = "", logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None) -> str:
     # Kein dynamischer Logo-Load – src direkt im img-Tag, Browser cached automatisch
     logo_head_script = ""
 
@@ -2008,6 +1828,209 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
         return "".join(sections)
 
+    import json as _json
+
+    # ── Massendruck: JSON-Daten + Sidebar-Sektion + JS aufbauen ──
+    if massendruck_data:
+        md_json = _json.dumps(massendruck_data, ensure_ascii=False)
+        md_days_json = _json.dumps({str(k): v for k, v in WOCHENTAGE.items()}, ensure_ascii=False)
+        massendruck_data_script = f"""
+        <script>
+        window.MASSENDRUCK = {{
+            assignments: {md_json},
+            days: {md_days_json}
+        }};
+        </script>"""
+
+        massendruck_sidebar_section = """
+        <div class="sidebar-section md-section" id="md-section">
+            <div class="sidebar-label">&#128438; Massendruck</div>
+            <div class="md-day-row" id="md-day-row">
+                <button class="md-day-btn" data-day="1">Mo</button>
+                <button class="md-day-btn" data-day="2">Di</button>
+                <button class="md-day-btn" data-day="3">Mi</button>
+                <button class="md-day-btn" data-day="4">Do</button>
+                <button class="md-day-btn" data-day="5">Fr</button>
+                <button class="md-day-btn" data-day="6">Sa</button>
+            </div>
+            <div class="md-stats" id="md-stats" style="display:none"></div>
+            <div class="md-table-wrap" id="md-table-wrap" style="display:none">
+                <table class="md-table">
+                    <thead><tr>
+                        <th>#</th><th>Kunde</th>
+                        <th id="md-th-p">Primär</th>
+                        <th id="md-th-s">Sekundär</th>
+                        <th></th>
+                    </tr></thead>
+                    <tbody id="md-table-body"></tbody>
+                </table>
+            </div>
+            <button type="button" class="sidebar-print-btn md-print-btn"
+                id="md-print-btn" style="display:none;margin-top:8px;"
+                onclick="printMassendruck()">&#128438; Alle drucken</button>
+        </div>"""
+
+        massendruck_css = """
+        .md-day-row {
+            display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px;
+        }
+        .md-day-btn {
+            flex: 1; min-width: 28px;
+            border: 1px solid var(--border); border-radius: 6px;
+            padding: 5px 2px; font-size: 11px; font-weight: 600;
+            font-family: inherit; cursor: pointer;
+            background: rgba(255,255,255,0.05); color: var(--ink-muted);
+            transition: all 0.15s;
+        }
+        .md-day-btn:hover { background: var(--bg-hover); color: #fff; }
+        .md-day-btn.active { background: var(--accent); color: var(--ink); border-color: transparent; }
+        .md-stats {
+            font-size: 10px; line-height: 1.7; margin-bottom: 6px;
+            padding: 5px 8px; background: rgba(255,255,255,0.04);
+            border-radius: 6px; border: 1px solid var(--border);
+        }
+        .md-table-wrap {
+            max-height: 240px; overflow-y: auto;
+            border: 1px solid var(--border); border-radius: 6px;
+            margin-bottom: 6px;
+            scrollbar-width: thin; scrollbar-color: var(--bg-hover) transparent;
+        }
+        .md-table {
+            width: 100%; border-collapse: collapse; font-size: 10px;
+        }
+        .md-table thead th {
+            position: sticky; top: 0;
+            background: #0d2035; color: #aaa; padding: 4px 5px;
+            text-align: left; font-size: 9px; letter-spacing: 0.05em;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+        .md-table tbody td {
+            padding: 3px 5px; border-bottom: 1px solid rgba(255,255,255,0.04);
+            color: #ccc; white-space: nowrap;
+        }
+        .md-table tbody tr:hover td { background: rgba(255,255,255,0.04); }
+        .md-table .md-tour { font-family: 'Courier New', monospace; }
+        .md-print-btn { margin: 0 0 8px 0 !important; width: 100% !important; }
+        @media print { .md-section { display: none !important; } }
+        """
+
+        massendruck_js = """
+        // ── Massendruck ──
+        (function() {
+            if (!window.MASSENDRUCK) return;
+            var MD = window.MASSENDRUCK;
+            var activeMdDay = null;
+
+            function escHtml(s) {
+                return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            }
+
+            function computeOrder(primaryDay) {
+                var secondaryDay = (primaryDay % 6) + 1;
+                var ordered = allEntries.map(function(entry) {
+                    var sap = (entry.getAttribute('data-sap') || '').trim();
+                    var name = entry.getAttribute('data-name') || '';
+                    var asgn = MD.assignments[sap] || {};
+                    var pt = asgn[String(primaryDay)] || '';
+                    var st = asgn[String(secondaryDay)] || '';
+                    var prio = pt ? 0 : (st ? 1 : 2);
+                    var tourDigits = (pt || st || '').replace(/\\D/g,'').padStart(8,'0');
+                    return { entry: entry, pt: pt, st: st, prio: prio, name: name,
+                             key: prio + tourDigits + name };
+                });
+                ordered.sort(function(a,b) { return a.key < b.key ? -1 : a.key > b.key ? 1 : 0; });
+                return ordered;
+            }
+
+            function applyMassendruck(primaryDay) {
+                activeMdDay = primaryDay;
+                var secondaryDay = (primaryDay % 6) + 1;
+                var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
+                var sdName = MD.days[String(secondaryDay)] || ('Tag ' + secondaryDay);
+
+                var ordered = computeOrder(primaryDay);
+
+                // DOM-Reihenfolge anpassen
+                var stack = document.querySelector('.page-stack');
+                ordered.forEach(function(o) { stack.appendChild(o.entry); });
+                allEntries = ordered.map(function(o) { return o.entry; });
+
+                // Zählungen
+                var pCount = ordered.filter(function(o){ return o.prio===0; }).length;
+                var sCount = ordered.filter(function(o){ return o.prio===1; }).length;
+                var uCount = ordered.filter(function(o){ return o.prio===2; }).length;
+
+                // Statistik
+                var stats = document.getElementById('md-stats');
+                stats.style.display = '';
+                stats.innerHTML =
+                    '<span style="color:#3fb950">&#9679; Prim\u00e4r (' + escHtml(pdName) + '): <strong>' + pCount + '</strong></span><br>' +
+                    '<span style="color:#58a6ff">&#9679; Sekund\u00e4r (' + escHtml(sdName) + '): <strong>' + sCount + '</strong></span><br>' +
+                    '<span style="color:#666">&#9679; \u00dcbrige: <strong>' + uCount + '</strong></span>';
+
+                // Spaltenköpfe
+                var thP = document.getElementById('md-th-p');
+                var thS = document.getElementById('md-th-s');
+                if (thP) thP.textContent = pdName.slice(0,2) + '-Tour';
+                if (thS) thS.textContent = sdName.slice(0,2) + '-Tour';
+
+                // Tabelle
+                var tbody = document.getElementById('md-table-body');
+                tbody.innerHTML = '';
+                ordered.forEach(function(o, i) {
+                    var dot = o.prio===0
+                        ? '<span style="color:#3fb950">&#9679;</span>'
+                        : o.prio===1
+                            ? '<span style="color:#58a6ff">&#9679;</span>'
+                            : '<span style="color:#444">&#9679;</span>';
+                    var tr = document.createElement('tr');
+                    var nameShort = o.name.length > 14 ? o.name.slice(0,13) + '\u2026' : o.name;
+                    tr.innerHTML =
+                        '<td style="color:#555;min-width:20px">' + (i+1) + '</td>' +
+                        '<td style="max-width:80px;overflow:hidden;text-overflow:ellipsis" title="' + escHtml(o.name) + '">' + escHtml(nameShort) + '</td>' +
+                        '<td class="md-tour" style="color:#f0a500">' + escHtml(o.pt) + '</td>' +
+                        '<td class="md-tour" style="color:#58a6ff">' + escHtml(o.st) + '</td>' +
+                        '<td>' + dot + '</td>';
+                    tbody.appendChild(tr);
+                });
+
+                var tw = document.getElementById('md-table-wrap');
+                var pb = document.getElementById('md-print-btn');
+                if (tw) tw.style.display = '';
+                if (pb) pb.style.display = '';
+
+                // Tag-Buttons
+                document.querySelectorAll('.md-day-btn').forEach(function(b) {
+                    b.classList.toggle('active', parseInt(b.getAttribute('data-day')) === primaryDay);
+                });
+            }
+
+            window.printMassendruck = function() {
+                // Alle sichtbaren (nicht durch Kategorie/Suche gefilterten) drucken
+                // DOM ist bereits in Massendruck-Reihenfolge – einfach window.print()
+                var entries = Array.from(document.querySelectorAll('.customer-entry'));
+                var hidden = entries.filter(function(e){ return e.style.display === 'none'; });
+                // Temporär auch gefilterte wieder einblenden für Gesamt-Massendruck
+                hidden.forEach(function(e){ e.setAttribute('data-md-hidden','1'); e.style.display=''; });
+                window.print();
+                hidden.forEach(function(e){ e.style.display='none'; e.removeAttribute('data-md-hidden'); });
+            };
+
+            document.addEventListener('DOMContentLoaded', function() {
+                document.querySelectorAll('.md-day-btn').forEach(function(btn) {
+                    btn.addEventListener('click', function() {
+                        applyMassendruck(parseInt(btn.getAttribute('data-day')));
+                    });
+                });
+            });
+        })();
+        """
+    else:
+        massendruck_data_script = ""
+        massendruck_sidebar_section = ""
+        massendruck_css = ""
+        massendruck_js = ""
+
     debug_html = _build_debug_html(debug_data)
     docs: List[str] = []
 
@@ -2046,11 +2069,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         entry_parts: List[str] = [render_customer_plan(customer, rows, logo_b64=logo_b64, logo_mime=logo_mime)]
 
         csb_search = " ".join([part for part in [csb_nr, *csb_touren] if part]).lower()
+        cust_name_escaped = html.escape(normalize_text(customer.get("Name", "")).lower())
         docs.append(
             (
                 f'<section class="customer-entry" '
                 f'data-sap="{html.escape(sap.lower())}" '
                 f'data-csb="{html.escape(csb_search)}" '
+                f'data-name="{cust_name_escaped}" '
                 f'data-kategorie="{html.escape(normalize_text(customer.get("Kategorie", "")))}" '
                 f'data-ohne-csb="{1 if not csb_touren else 0}" '
                 f'data-search="{html.escape(search_blob)}">'
@@ -2358,6 +2383,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             entries.forEach(function (e) { e.classList.remove("print-hidden"); });
         };
     })();
+    """ + massendruck_js + """
     </script>
     """
 
@@ -2443,6 +2469,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             border-radius:8px; margin-bottom:4px;
         }}
         .dbg-gesamt-export:hover {{ opacity:0.9; }}
+        {massendruck_css}
         </style>
         <script>
         function toggleDebug() {{ document.getElementById('debug-panel').classList.toggle('open'); }}
@@ -2452,9 +2479,10 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             }}
         }});
         </script>
+        {massendruck_data_script}
     </head>
     <body>
-        {render_export_search_toolbar()}
+        {render_export_search_toolbar(massendruck_sidebar_section)}
         <div class="main-content">
         <div class="page-stack">
         {''.join(docs)}
@@ -2729,6 +2757,25 @@ def main() -> None:
 
     st.divider()
 
+    st.divider()
+
+    # ── Massendruck-Daten vorbereiten (gecacht) ──
+    md_data = None
+    if sw_sap_file and sw_kisoft_file:
+        try:
+            _sw_key = hashlib.md5(sw_sap_file.getvalue() + sw_kisoft_file.getvalue()).hexdigest()
+            if st.session_state.get("_sw_cache_key") != _sw_key:
+                st.session_state["_day_assignments"] = build_day_assignments(
+                    sw_sap_file.getvalue(), sw_sap_file.name,
+                    sw_kisoft_file.getvalue(), sw_kisoft_file.name,
+                    csv_separator,
+                )
+                st.session_state["_sw_cache_key"] = _sw_key
+            md_data = st.session_state.get("_day_assignments")
+            st.caption("✓ Standardwoche geladen – Massendruck-Sortierung im HTML verfügbar.")
+        except Exception as exc:
+            st.warning(f"Standardwoche konnte nicht verarbeitet werden: {exc}")
+
     # ── Der eine Button ──
     if st.button("⚡ Plan generieren", use_container_width=True, type="primary"):
         with st.spinner(f"Generiere HTML für {len(customers_df)} Kunden …"):
@@ -2736,6 +2783,7 @@ def main() -> None:
                 customers_df, plan_rows_df,
                 logo_b64=logo_b64, logo_mime=logo_mime,
                 debug_data=debug_reports,
+                massendruck_data=md_data,
             )
         st.session_state["_export_html"] = bulk_html
         st.session_state["_export_ready"] = True
@@ -2750,18 +2798,6 @@ def main() -> None:
             use_container_width=True,
         )
         st.caption("HTML im Browser öffnen → Suche, Filter, Druck alles drin.")
-
-    # ── Massendruck ──
-    show_massendruck_section(
-        customers_df=customers_df,
-        plan_rows_df=plan_rows_df,
-        debug_reports=debug_reports,
-        logo_b64=logo_b64,
-        logo_mime=logo_mime,
-        csv_separator=csv_separator,
-        sw_sap_file=sw_sap_file,
-        sw_kisoft_file=sw_kisoft_file,
-    )
 
 
 if __name__ == "__main__":
