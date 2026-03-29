@@ -1095,32 +1095,34 @@ def export_css() -> str:
             scrollbar-color: var(--sb-border) transparent;
         }
         .sidebar-logo {
-            padding: 18px 16px 14px;
+            padding: 16px 14px 14px;
             border-bottom: 1px solid var(--sb-border);
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
             background: #fff;
         }
         .sidebar-logo-icon {
-            width: 32px; height: 32px;
+            width: 48px; height: 48px;
             background: #e6a100;
-            border-radius: 8px;
+            border-radius: 10px;
             display: flex; align-items: center; justify-content: center;
-            font-size: 15px; flex-shrink: 0;
-            box-shadow: 0 2px 6px rgba(230,161,0,0.35);
+            font-size: 22px; flex-shrink: 0;
+            box-shadow: 0 2px 8px rgba(230,161,0,0.35);
         }
         .sidebar-logo-text {
-            font-size: 13px;
-            font-weight: 700;
+            font-size: 12px;
+            font-weight: 800;
             color: #1a2332;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.01em;
+            line-height: 1.25;
         }
         .sidebar-logo-sub {
-            font-size: 10px;
-            color: var(--sb-muted);
-            font-weight: 400;
-            margin-top: 1px;
+            font-size: 10.5px;
+            color: #e6a100;
+            font-weight: 600;
+            margin-top: 2px;
+            letter-spacing: 0.02em;
         }
         .sidebar-section {
             padding: 14px 12px 10px;
@@ -1741,7 +1743,8 @@ def render_export_search_toolbar(massendruck_section: str = "", logo_b64: str = 
     if logo_b64:
         logo_html = (
             f'<img src="data:{logo_mime};base64,{logo_b64}" '
-            f'alt="Logo" style="max-width:36px;max-height:36px;width:auto;height:auto;border-radius:6px;flex-shrink:0;">'
+            f'alt="Logo" style="max-width:48px;max-height:48px;width:auto;height:auto;'
+            f'border-radius:8px;flex-shrink:0;object-fit:contain;">'
         )
     else:
         logo_html = '<div class="sidebar-logo-icon">&#128230;</div>'
@@ -1751,7 +1754,7 @@ def render_export_search_toolbar(massendruck_section: str = "", logo_b64: str = 
         <div class="sidebar-logo">
             {logo_html}
             <div>
-                <div class="sidebar-logo-text">Sendeplan</div>
+                <div class="sidebar-logo-text">Sende- &amp; Belieferungsplan</div>
                 <div class="sidebar-logo-sub">NORDfrische Center</div>
             </div>
         </div>
