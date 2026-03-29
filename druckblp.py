@@ -22,6 +22,10 @@ st.set_page_config(
 )
 
 
+# ============================================================
+# DOMAIN-KONFIGURATION
+# Zentrale Stelle für Depot-/Touren-Wissen, das sich ändern kann.
+# ============================================================
 WOCHENTAGE = {
     1: "Montag",
     2: "Dienstag",
@@ -32,6 +36,40 @@ WOCHENTAGE = {
 }
 
 KATEGORIEN = ["Alle", "MK", "Malchow", "NMS", "SuL", "Direkt"]
+
+# Tourenklassifikation: CSB-Tournummern → Depot-Kategorie
+DEPOT_CONFIG = {
+    "sul_touren": {"1058", "2058", "3058", "4058", "5058", "6030",
+                   "14444", "24444", "34444", "44444", "54444"},
+    "muster": [
+        # (Muster im CSB-String, Kategorie)  – Reihenfolge = Priorität
+        ("88",  "MK"),
+        ("777", "Malchow"),
+        ("222", "NMS"),
+    ],
+    "fallback": "Direkt",
+}
+
+# Sortiment-Reihenfolge im Sendeplan
+SORTIMENT_PRIO = {
+    "fleisch- & wurst bedienung": 0,
+    "fleisch- & wurst sb":        1,
+    "heidemark":                  2,
+}
+SORTIMENT_ZUSATZ_KEYWORDS = ("avo", "werbemittel", "hamburger jungs")
+
+# Zusatz-Sortimente: (Spaltenindex T.Zeit, Fallback-Bestellzeitende, Anzeigename)
+KST_ZUSATZ_GRUPPEN = [
+    (7,  "09:00", "AVO-Gewürze"),
+    (10, "09:00", "Werbemittel-Sonder"),
+    (13, "09:00", "Werbemittel"),
+    (16, "09:00", "Hamburger Jungs"),
+]
+
+TAG_ABKUERZUNGEN = {
+    "mo": "Montag", "die": "Dienstag", "mitt": "Mittwoch", "mi": "Mittwoch",
+    "don": "Donnerstag", "do": "Donnerstag", "fr": "Freitag", "sa": "Samstag", "so": "Sonntag",
+}
 
 UPLOAD_CONFIG = {
     "kunden": {
@@ -106,25 +144,19 @@ def build_kisoft_key(rahmentour_raw: str) -> str:
     return f"00{raw[:8]}" if raw else ""
 
 
-_SuL_TOUREN = {"1058","2058","3058","4058","5058","6030",
-                "14444","24444","34444","44444","54444"}
-
-
 def classify_by_csb_tour(csb_tour: str) -> str:
     """Klassifiziert anhand der CSB-Tournummer (aus Kisoft).
 
     Priorität: SuL > MK (X88X) > Malchow (X777X) > NMS (X222X) > Direkt
+    Konfiguration kommt aus DEPOT_CONFIG.
     """
     csb = normalize_digits(csb_tour)
-    if csb in _SuL_TOUREN:
+    if csb in DEPOT_CONFIG["sul_touren"]:
         return "SuL"
-    if "88" in csb:
-        return "MK"
-    if "777" in csb:
-        return "Malchow"
-    if "222" in csb:
-        return "NMS"
-    return "Direkt"
+    for muster, kategorie in DEPOT_CONFIG["muster"]:
+        if muster in csb:
+            return kategorie
+    return DEPOT_CONFIG["fallback"]
 
 
 
@@ -167,6 +199,7 @@ def read_upload_to_raw_dataframe(file_bytes: bytes, filename: str, csv_separator
             io.BytesIO(file_bytes),
             header=None,
             dtype=str,
+            keep_default_na=False,
         )
 
     raise ValueError(f"Nicht unterstütztes Dateiformat: {suffix}")
@@ -335,7 +368,7 @@ def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: s
                 break
         if _chosen is None:
             _chosen = _wb.sheetnames[0]
-        raw_df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=_chosen, header=None, dtype=str)
+        raw_df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=_chosen, header=None, dtype=str, keep_default_na=False)
 
     if raw_df.shape[1] < 4:
         raise ValueError("Kostenstellen-Datei benoetigt mindestens 4 Spalten (A-D).")
@@ -380,18 +413,7 @@ def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: s
 # ZUSATZ-SORTIMENTE AUS KOSTENSTELLENPLAN (AVO, WERBEMITTEL …)
 # ============================================================
 
-# Liefertyp-Gruppen: (Spaltenindex T.Zeit, Bestellzeitende-Fallback, Anzeigename)
-_KST_ZUSATZ_GRUPPEN = [
-    (7,  "09:00", "AVO-Gewürze"),
-    (10, "09:00", "Werbemittel-Sonder"),
-    (13, "09:00", "Werbemittel"),
-    (16, "09:00", "Hamburger Jungs"),
-]
-
-_TAG_ABK = {
-    "mo": "Montag", "die": "Dienstag", "mitt": "Mittwoch", "mi": "Mittwoch",
-    "don": "Donnerstag", "do": "Donnerstag", "fr": "Freitag", "sa": "Samstag", "so": "Sonntag",
-}
+# Liefertyp-Gruppen nutzen zentrale KST_ZUSATZ_GRUPPEN-Konfiguration
 
 def _parse_kst_time(val) -> str:
     """Wandelt z.B. 915 -> '09:15', 1045 -> '10:45', 2045 -> '20:45'."""
@@ -412,7 +434,7 @@ def _parse_kst_tag(val) -> str:
     if val is None:
         return ""
     key = str(val).strip().lower()
-    return _TAG_ABK.get(key, str(val).strip())
+    return TAG_ABKUERZUNGEN.get(key, str(val).strip())
 
 
 def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
@@ -456,7 +478,7 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
             continue
 
         # Für jede Zusatz-Gruppe
-        for col_start, zeit_fallback, sortiment_name in _KST_ZUSATZ_GRUPPEN:
+        for col_start, zeit_fallback, sortiment_name in KST_ZUSATZ_GRUPPEN:
             if len(row) <= col_start + 2:
                 continue
             zeit_val  = row[col_start]       # Abfahrtszeit
@@ -673,18 +695,13 @@ def prepare_dataframes(
     plan_rows["Verladetor"] = plan_rows["Verladetor"].fillna("")
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
     # Sortiment-Priorität: Fleisch/Heidemark zuerst, CSB-Kram zuletzt
-    _SORTIMENT_PRIO = {
-        "fleisch- & wurst bedienung": 0,
-        "fleisch- & wurst sb":        1,
-        "heidemark":                  2,
-    }
     def _sortiment_key(name: str) -> tuple:
         n = str(name).strip().lower()
         # CSB-Kram (AVO, Werbemittel, Hamburger Jungs) ans Ende
-        if any(k in n for k in ("avo", "werbemittel", "hamburger jungs")):
+        if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
             return (9, name)
         # Prioritäts-Sortimente ganz vorne
-        for key, prio in _SORTIMENT_PRIO.items():
+        for key, prio in SORTIMENT_PRIO.items():
             if key in n:
                 return (prio, name)
         # Alles andere in der Mitte (alphabetisch)
@@ -728,6 +745,14 @@ def prepare_dataframes(
 
     counts = {cat: int((kunden_basis["Kategorie"] == cat).sum()) for cat in KATEGORIEN if cat != "Alle"}
     counts["Alle"] = int(len(kunden_basis))
+
+    # Vorberechnete Suchspalte für schnelle filter_customers-Aufrufe
+    kunden_basis["_search_blob"] = (
+        kunden_basis["SAP_Nr"].fillna("") + " " +
+        kunden_basis["Name"].fillna("") + " " +
+        kunden_basis["CSB_Nr"].fillna("") + " " +
+        kunden_basis["Ort"].fillna("")
+    ).str.lower()
 
     return kunden_basis, plan_rows, counts, df_kisoft, df_sap
 
@@ -950,20 +975,24 @@ def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
 # FILTER
 # ============================================================
 def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str) -> pd.DataFrame:
-    result = df_customers.copy()
+    mask = pd.Series(True, index=df_customers.index)
 
     if category != "Alle":
-        result = result[result["Kategorie"] == category]
+        mask &= df_customers["Kategorie"] == category
 
     search = normalize_text(search_text).lower()
     if search:
-        result = result[
-            result["SAP_Nr"].str.lower().str.contains(search, na=False)
-            | result["Name"].str.lower().str.contains(search, na=False)
-            | result["CSB_Nr"].str.lower().str.contains(search, na=False)
-        ]
+        # Nutze vorberechnete _search_blob Spalte wenn vorhanden, sonst Fallback
+        if "_search_blob" in df_customers.columns:
+            mask &= df_customers["_search_blob"].str.contains(search, na=False)
+        else:
+            mask &= (
+                df_customers["SAP_Nr"].str.lower().str.contains(search, na=False)
+                | df_customers["Name"].str.lower().str.contains(search, na=False)
+                | df_customers["CSB_Nr"].str.lower().str.contains(search, na=False)
+            )
 
-    return result.sort_values(["Name", "SAP_Nr"], na_position="last").reset_index(drop=True)
+    return df_customers.loc[mask].sort_values(["Name", "SAP_Nr"], na_position="last").reset_index(drop=True)
 
 
 # ============================================================
@@ -972,19 +1001,8 @@ def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str
 def streamlit_css() -> str:
     return """
     <style>
-        .stApp { background: #0e1117; color: #e0e0e0; }
-        .stApp p, .stApp li, .stApp label, .stApp div,
-        .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp h5,
-        .stApp span { color: #e0e0e0; }
-        section[data-testid="stSidebar"] { background: #161b22; border-right: 1px solid #21262d; }
-        .stFileUploader { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 0.4rem; }
-        div[data-baseweb="input"] input,
-        .stTextInput input {
-            background: #0d1117 !important; color: #e0e0e0 !important; border-color: #30363d !important;
-        }
-        /* Metric-Werte und -Labels */
-        [data-testid="stMetricValue"] { color: #e0e0e0 !important; }
-        [data-testid="stMetricLabel"] { color: #aaa !important; }
+        /* Nur Custom-Classes – keine globalen Streamlit-Selektoren überschreiben,
+           damit Updates nicht brechen. Streamlit-Theme via .streamlit/config.toml setzen. */
         .status-ok   { color: #3fb950; font-size: 0.85rem; }
         .status-miss { color: #f85149; font-size: 0.85rem; }
 
@@ -996,7 +1014,6 @@ def streamlit_css() -> str:
             padding: 1rem 1.1rem;
             margin-bottom: 0.75rem;
         }
-        .app-panel h3 { color: #e0e0e0 !important; }
         .muted-note { color: #888; font-size: 0.82rem; }
 
         /* Hero-Card */
@@ -1104,7 +1121,7 @@ def export_css() -> str:
         }
         .sidebar-logo-icon {
             width: 48px; height: 48px;
-            background: #e6a100;
+            background: var(--sb-active);
             border-radius: 10px;
             display: flex; align-items: center; justify-content: center;
             font-size: 22px; flex-shrink: 0;
@@ -1119,7 +1136,7 @@ def export_css() -> str:
         }
         .sidebar-logo-sub {
             font-size: 10.5px;
-            color: #e6a100;
+            color: var(--sb-active);
             font-weight: 600;
             margin-top: 2px;
             letter-spacing: 0.02em;
@@ -1151,7 +1168,7 @@ def export_css() -> str:
         }
         .sidebar input[type=text]::placeholder { color: #aab2be; }
         .sidebar input[type=text]:focus {
-            border-color: #e6a100;
+            border-color: var(--sb-active);
             box-shadow: 0 0 0 3px rgba(230,161,0,0.15);
         }
         .filter-btn {
@@ -1178,7 +1195,7 @@ def export_css() -> str:
             border-color: var(--sb-border);
         }
         .filter-btn.active {
-            background: #e6a100;
+            background: var(--sb-active);
             color: #fff;
             font-weight: 700;
             border-color: transparent;
@@ -1252,7 +1269,7 @@ def export_css() -> str:
             font-weight: 700;
             font-family: inherit;
             cursor: pointer;
-            background: #e6a100;
+            background: var(--sb-active);
             color: #fff;
             text-align: center;
             transition: all 0.15s;
@@ -1470,6 +1487,44 @@ def export_css() -> str:
             .is-match, .is-current { box-shadow: none !important; }
             .print-hidden { display: none !important; }
         }
+
+        /* ══════════════════════════════════════
+           RESPONSIVE – Tablets / kleine Screens
+        ══════════════════════════════════════ */
+        @media screen and (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: -260px;
+                transition: left 0.25s ease;
+                z-index: 200;
+            }
+            .sidebar.mobile-open { left: 0; }
+            .mobile-toggle {
+                display: block;
+                position: fixed;
+                top: 10px; left: 10px;
+                z-index: 201;
+                background: var(--sb-active, #e6a100);
+                color: #fff;
+                border: none; border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 18px;
+                cursor: pointer;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            }
+            .main-content { margin-left: 0 !important; }
+        }
+        @media screen and (min-width: 769px) {
+            .mobile-toggle { display: none; }
+        }
+
+        /* ══════════════════════════════════════
+           CONTENTEDITABLE DIRTY-STATE
+        ══════════════════════════════════════ */
+        .doc-subtitle.is-edited {
+            background: rgba(200,0,0,0.06);
+            border-bottom: 2px dashed rgba(200,0,0,0.3);
+        }
     </style>
     """
 
@@ -1557,18 +1612,19 @@ def render_plan_table(rows: pd.DataFrame) -> str:
 
     # Rowspan pro Liefertag zählen
     day_counts: dict = {}
-    for _, row in ordered.iterrows():
-        d = normalize_text(row.get("Liefertag", "Unbekannt"))
+    records = ordered[["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende"]].fillna("").to_dict("records")
+    for rec in records:
+        d = rec["Liefertag"] or "Unbekannt"
         day_counts[d] = day_counts.get(d, 0) + 1
 
     body_rows: list = []
     day_seen: set = set()
 
-    for i, (_, row) in enumerate(ordered.iterrows()):
-        day        = normalize_text(row.get("Liefertag", "Unbekannt"))
-        sortiment  = normalize_text(row.get("Sortiment", ""))
-        bestelltag = normalize_text(row.get("Bestelltag_Name", ""))
-        zeitende   = normalize_text(row.get("Bestellzeitende", ""))
+    for rec in records:
+        day        = rec["Liefertag"] or "Unbekannt"
+        sortiment  = rec["Sortiment"]
+        bestelltag = rec["Bestelltag_Name"]
+        zeitende   = rec["Bestellzeitende"]
 
         # "Uhr" anhängen falls nicht schon vorhanden
         if zeitende and "uhr" not in zeitende.lower():
@@ -1652,21 +1708,24 @@ def render_customer_plan(
     logo_mime: str = "image/png",
     bulk_mode: bool = False,
 ) -> str:
-    """Rendert eine einzelne Kundenseite exakt nach dem PDF-Vorbild."""
-    sap_nr      = normalize_text(customer.get("SAP_Nr", ""))
-    csb_nr      = normalize_text(customer.get("CSB_Nr", ""))
-    name        = normalize_text(customer.get("Name", ""))
-    strasse     = normalize_text(customer.get("Strasse", ""))
-    plz         = normalize_text(customer.get("PLZ", ""))
-    ort         = normalize_text(customer.get("Ort", ""))
-    fachberater = normalize_text(customer.get("Fachberater", ""))
-    tourengruppe = normalize_text(customer.get("Tourengruppe", ""))
-    kostenstelle = normalize_text(customer.get("Kostenstelle", ""))
-    leiter       = normalize_text(customer.get("Leiter", ""))
+    """Rendert eine einzelne Kundenseite exakt nach dem PDF-Vorbild.
+    Hinweis: Kundendaten sind bereits in cleanup_dataframe() normalisiert,
+    daher kein erneuter normalize_text-Aufruf nötig.
+    """
+    sap_nr      = str(customer.get("SAP_Nr", ""))
+    csb_nr      = str(customer.get("CSB_Nr", ""))
+    name        = str(customer.get("Name", ""))
+    strasse     = str(customer.get("Strasse", ""))
+    plz         = str(customer.get("PLZ", ""))
+    ort         = str(customer.get("Ort", ""))
+    fachberater = str(customer.get("Fachberater", ""))
+    tourengruppe = str(customer.get("Tourengruppe", ""))
+    kostenstelle = str(customer.get("Kostenstelle", ""))
+    leiter       = str(customer.get("Leiter", ""))
     stand = datetime.now().strftime("%d.%m.%Y")
 
     # Tourengruppe -> Subtitle (Standard / NMS / Malchow / MK …)
-    kategorie = normalize_text(customer.get("Kategorie", ""))
+    kategorie = str(customer.get("Kategorie", ""))
     subtitle = "Standard"  # Immer Standard – per contenteditable änderbar
 
     tour_overview_html = render_tour_overview(customer_rows)
@@ -1730,11 +1789,11 @@ def render_cover_page(title: str, subtitle: str, lines: List[str]) -> str:
 def render_separator_page(customer: pd.Series) -> str:
     return f"""
     <div class="separator-page">
-        <h1>{html.escape(normalize_text(customer.get('Name', '')))}</h1>
-        <h2>SAP {html.escape(normalize_text(customer.get('SAP_Nr', '')))}</h2>
-        <p>CSB {html.escape(normalize_text(customer.get('CSB_Nr', '')))}</p>
-        <p>{html.escape(normalize_text(customer.get('PLZ', '')))} {html.escape(normalize_text(customer.get('Ort', '')))}</p>
-        <p>Kategorie: {html.escape(normalize_text(customer.get('Kategorie', '')))}</p>
+        <h1>{html.escape(str(customer.get('Name', '')))}</h1>
+        <h2>SAP {html.escape(str(customer.get('SAP_Nr', '')))}</h2>
+        <p>CSB {html.escape(str(customer.get('CSB_Nr', '')))}</p>
+        <p>{html.escape(str(customer.get('PLZ', '')))} {html.escape(str(customer.get('Ort', '')))}</p>
+        <p>Kategorie: {html.escape(str(customer.get('Kategorie', '')))}</p>
     </div>
     """
 
@@ -1750,6 +1809,9 @@ def render_export_search_toolbar(massendruck_section: str = "", logo_b64: str = 
         logo_html = '<div class="sidebar-logo-icon">&#128230;</div>'
 
     return f"""
+    <button type="button" class="mobile-toggle" id="mobile-toggle"
+        onclick="document.getElementById('sidebar').classList.toggle('mobile-open')"
+        aria-label="Menü öffnen">&#9776;</button>
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-logo">
             {logo_html}
@@ -1982,7 +2044,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             transition: all 0.14s;
         }
         .md-day-btn:hover { background: var(--sb-hover, #e8ecf2); color: #1a2332; border-color: #b0bac8; }
-        .md-day-btn.active { background: #e6a100; color: #fff; border-color: transparent;
+        .md-day-btn.active { background: var(--sb-active, #e6a100); color: #fff; border-color: transparent;
             box-shadow: 0 2px 6px rgba(230,161,0,0.3); }
         .md-stats {
             font-size: 10px; line-height: 1.8; margin-bottom: 6px;
@@ -2296,16 +2358,16 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         massendruck_js = ""
 
     debug_html = _build_debug_html(debug_data)
-    docs: List[str] = []
+    docs_buffer = io.StringIO()
 
     # Vorab gruppieren statt pro Kunde den gesamten DataFrame zu filtern
     _plan_grouped = {sap: grp for sap, grp in plan_rows.groupby("SAP_Nr")}
 
     entry_count = 0
     for _, customer in customers.iterrows():
-        sap = normalize_text(customer.get("SAP_Nr", ""))
+        sap = customer.get("SAP_Nr", "")
         rows = _plan_grouped.get(sap, pd.DataFrame(columns=plan_rows.columns)).copy()
-        csb_nr = normalize_text(customer.get("CSB_Nr", ""))
+        csb_nr = customer.get("CSB_Nr", "")
         csb_touren = sorted({
             normalize_text(value)
             for value in rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist()
@@ -2318,13 +2380,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         search_blob = " ".join(
             part for part in [
                 sap, csb_nr, " ".join(csb_touren),
-                normalize_text(customer.get("Name", "")),
-                normalize_text(customer.get("Ort", "")),
-                normalize_text(customer.get("PLZ", "")),
-                normalize_text(customer.get("Strasse", "")),
-                normalize_text(customer.get("Fachberater", "")),
-                normalize_text(customer.get("Tourengruppe", "")),
-                normalize_text(customer.get("Kategorie", "")),
+                customer.get("Name", ""),
+                customer.get("Ort", ""),
+                customer.get("PLZ", ""),
+                customer.get("Strasse", ""),
+                customer.get("Fachberater", ""),
+                customer.get("Tourengruppe", ""),
+                customer.get("Kategorie", ""),
                 sortimente_text,
             ]
             if part
@@ -2336,19 +2398,17 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         entry_parts.append(render_customer_plan(customer, rows, logo_b64="", logo_mime=logo_mime, bulk_mode=True))
 
         csb_search = " ".join([part for part in [csb_nr, *csb_touren] if part]).lower()
-        cust_name_escaped = html.escape(normalize_text(customer.get("Name", "")).lower())
-        docs.append(
-            (
-                f'<section class="customer-entry" '
-                f'data-sap="{html.escape(sap.lower())}" '
-                f'data-csb="{html.escape(csb_search)}" '
-                f'data-name="{cust_name_escaped}" '
-                f'data-kategorie="{html.escape(normalize_text(customer.get("Kategorie", "")))}" '
-                f'data-ohne-csb="{1 if not csb_touren else 0}" '
-                f'data-search="{html.escape(search_blob)}">'
-                f'{"".join(entry_parts)}'
-                f'</section>'
-            )
+        cust_name_escaped = html.escape(str(customer.get("Name", "")).lower())
+        docs_buffer.write(
+            f'<section class="customer-entry" '
+            f'data-sap="{html.escape(sap.lower())}" '
+            f'data-csb="{html.escape(csb_search)}" '
+            f'data-name="{cust_name_escaped}" '
+            f'data-kategorie="{html.escape(str(customer.get("Kategorie", "")))}" '
+            f'data-ohne-csb="{1 if not csb_touren else 0}" '
+            f'data-search="{html.escape(search_blob)}">'
+            f'{"".join(entry_parts)}'
+            f'</section>'
         )
         entry_count += 1
 
@@ -2552,6 +2612,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (!val.trim()) return;
                 document.querySelectorAll(".doc-subtitle").forEach(function (el) {
                     el.textContent = val;
+                    el.classList.add("is-edited");
                 });
             }
             document.getElementById("btn-apply-subtitle").addEventListener("click", applyGlobalSubtitle);
@@ -2559,70 +2620,80 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (e.key === "Enter") { e.preventDefault(); applyGlobalSubtitle(); }
             });
 
+            // Contenteditable dirty-state: visuelles Feedback bei manueller Bearbeitung
+            document.querySelectorAll(".doc-subtitle").forEach(function (el) {
+                var orig = el.textContent;
+                el.addEventListener("input", function () {
+                    el.classList.toggle("is-edited", el.textContent !== orig);
+                });
+            });
+
             updateSearchCount();
             updateCounts();
 
-            // ── Inhalt auf A4 skalieren (zoom + Firefox-Fallback via transform) ──
+            // ── Lazy fitToPage: nur sichtbare Papers skalieren (IntersectionObserver) ──
             var supportsZoom = 'zoom' in document.documentElement.style &&
                 !/firefox/i.test(navigator.userAgent);
 
-            function fitToPage() {
-                var inners = Array.from(document.querySelectorAll(".paper-inner"));
-                // Reset zuerst – alle auf einmal damit Layout stabil ist
-                inners.forEach(function (el) {
-                    el.style.zoom = "";
-                    el.style.transform = "";
-                    el.style.transformOrigin = "";
-                    el.style.width = "210mm";
-                });
-                // Alle Reads in einem Durchgang (kein Reflow-Thrashing)
-                var measurements = inners.map(function (inner) {
-                    return {
-                        inner:   inner,
-                        paperH:  inner.parentElement.clientHeight,
-                        paperW:  inner.parentElement.clientWidth,
-                        contentH: inner.scrollHeight,
-                        contentW: inner.scrollWidth,
-                    };
-                });
-                // Alle Writes in einem Durchgang
-                measurements.forEach(function (m) {
-                    var scale = Math.min(
-                        m.paperH / m.contentH,
-                        m.paperW / m.contentW,
-                        1
-                    );
-                    if (scale < 1) {
-                        if (supportsZoom) {
-                            m.inner.style.zoom = scale;
-                        } else {
-                            m.inner.style.transform = "scale(" + scale + ")";
-                            m.inner.style.transformOrigin = "top left";
-                        }
-                        m.inner.style.width = "210mm";
+            function fitSinglePaper(inner) {
+                // Reset
+                inner.style.zoom = "";
+                inner.style.transform = "";
+                inner.style.transformOrigin = "";
+                inner.style.width = "210mm";
+                // Measure
+                var paperH = inner.parentElement.clientHeight;
+                var paperW = inner.parentElement.clientWidth;
+                var contentH = inner.scrollHeight;
+                var contentW = inner.scrollWidth;
+                var scale = Math.min(paperH / contentH, paperW / contentW, 1);
+                if (scale < 1) {
+                    if (supportsZoom) {
+                        inner.style.zoom = scale;
+                    } else {
+                        inner.style.transform = "scale(" + scale + ")";
+                        inner.style.transformOrigin = "top left";
+                    }
+                    inner.style.width = "210mm";
+                }
+            }
+
+            // Lazy: nur Papers skalieren wenn sie in den Viewport kommen
+            var fitObserver = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (entry.isIntersecting) {
+                        var inner = entry.target.querySelector(".paper-inner");
+                        if (inner) fitSinglePaper(inner);
+                        fitObserver.unobserve(entry.target);
                     }
                 });
-            }
-            // requestAnimationFrame: erst nach erstem Paint messen
-            requestAnimationFrame(function () {
-                requestAnimationFrame(fitToPage);
+            }, { rootMargin: "200px 0px" });
+
+            document.querySelectorAll(".paper").forEach(function (p) {
+                fitObserver.observe(p);
             });
+
             var _resizeTimer = null;
             window.addEventListener("resize", function () {
                 clearTimeout(_resizeTimer);
-                _resizeTimer = setTimeout(fitToPage, 200);
+                _resizeTimer = setTimeout(function () {
+                    // Bei Resize alle sichtbaren Papers neu skalieren
+                    document.querySelectorAll(".paper").forEach(function (p) {
+                        fitObserver.observe(p);
+                    });
+                }, 200);
             });
 
             // ── Aktuell sichtbaren Kunden tracken (IntersectionObserver) ──
             var currentVisible = null;
-            var observer = new IntersectionObserver(function (entries) {
+            var visObserver = new IntersectionObserver(function (entries) {
                 entries.forEach(function (entry) {
                     if (entry.isIntersecting) {
                         currentVisible = entry.target;
                     }
                 });
             }, { threshold: 0.3 });
-            allEntries.forEach(function (e) { observer.observe(e); });
+            allEntries.forEach(function (e) { visObserver.observe(e); });
         });
 
         window.printCurrent = function printCurrent() {
@@ -2754,7 +2825,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         {render_export_search_toolbar(massendruck_sidebar_section, logo_b64=sidebar_logo_b64, logo_mime=sidebar_logo_mime)}
         <div class="main-content">
         <div class="page-stack">
-        {''.join(docs)}
+        {docs_buffer.getvalue()}
         </div>
         </div>
         <div class="debug-panel" id="debug-panel">
@@ -2777,7 +2848,7 @@ def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame,
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Sendeplan {html.escape(normalize_text(customer.get('SAP_Nr', '')))}</title>
+        <title>Sendeplan {html.escape(str(customer.get('SAP_Nr', '')))}</title>
         {export_css()}
     </head>
     <body>
@@ -3031,12 +3102,11 @@ def main() -> None:
 
     # ── Daten verarbeiten (csv_separator kommt aus Selectbox oben) ──
     try:
-        _cache_key = hashlib.md5(
-            kunden_file.getvalue() + sap_file.getvalue() +
-            transport_file.getvalue() + kisoft_file.getvalue() +
-            kostenstellen_file.getvalue() +
-            csv_separator.encode()
-        ).hexdigest()
+        _hasher = hashlib.md5()
+        for _f in (kunden_file, sap_file, transport_file, kisoft_file, kostenstellen_file):
+            _hasher.update(_f.getvalue())
+        _hasher.update(csv_separator.encode())
+        _cache_key = _hasher.hexdigest()
 
         if st.session_state.get("_df_cache_key") != _cache_key:
             _result = prepare_dataframes(
@@ -3087,7 +3157,10 @@ def main() -> None:
     md_data = None
     if sw_sap_file and sw_kisoft_file:
         try:
-            _sw_key = hashlib.md5(sw_sap_file.getvalue() + sw_kisoft_file.getvalue()).hexdigest()
+            _sw_hasher = hashlib.md5()
+            _sw_hasher.update(sw_sap_file.getvalue())
+            _sw_hasher.update(sw_kisoft_file.getvalue())
+            _sw_key = _sw_hasher.hexdigest()
             if st.session_state.get("_sw_cache_key") != _sw_key:
                 st.session_state["_day_assignments"] = build_day_assignments(
                     sw_sap_file.getvalue(), sw_sap_file.name,
@@ -3138,6 +3211,7 @@ def main() -> None:
             progress.progress(100, text="Fertig!")
             st.session_state["_export_html"] = bulk_html
             st.session_state["_export_ready"] = True
+            st.toast(f"✅ HTML für {n} Kunden generiert!", icon="📦")
 
         if st.session_state.get("_export_ready"):
             html_bytes = st.session_state["_export_html"].encode("utf-8")
