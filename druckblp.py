@@ -113,7 +113,6 @@ UPLOAD_CONFIG = {
     },
 }
 
-KISOFT_REQUIRED_COLUMNS = ["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor"]
 KOSTENSTELLEN_REQUIRED_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "kostenstelle", "leiter"]
 
 
@@ -139,13 +138,8 @@ def day_name_from_number(value) -> str:
         return "Unbekannt"
 
 
-def build_kisoft_key(rahmentour_raw: str) -> str:
-    raw = normalize_text(rahmentour_raw)
-    return f"00{raw[:8]}" if raw else ""
-
-
 def classify_by_csb_tour(csb_tour: str) -> str:
-    """Klassifiziert anhand der CSB-Tournummer (aus Kisoft).
+    """Klassifiziert anhand der CSB-Tournummer.
 
     Priorität: SuL > MK (X88X) > Malchow (X777X) > NMS (X222X) > Direkt
     Konfiguration kommt aus DEPOT_CONFIG.
@@ -262,52 +256,6 @@ def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str,
     structured_df = cleanup_dataframe(structured_df, config["key"])
     validate_required_columns(structured_df, config["required"], config["label"])
     return structured_df
-
-
-def load_kisoft_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
-    """Liest die Kisoft-Datei.
-
-    Unterstuetzt zwei Formate:
-    - Mit Kopfzeile: Spalten werden per Name gefunden
-      (SAP Rahmentour, CSB Tournummer, Wochentag, Verladetor)
-    - Ohne Kopfzeile: feste Positionen 0, 1, 2, 4
-    """
-    raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
-
-    if raw_df.shape[1] < 3:
-        raise ValueError("Kisoft-Datei muss mindestens 3 Spalten enthalten.")
-
-    # Pruefen ob erste Zeile eine Kopfzeile ist
-    first_row = {normalize_text(v).lower() for v in raw_df.iloc[0].tolist()}
-    has_header = bool(first_row & {"sap rahmentour", "csb tournummer"})
-
-    if has_header:
-        # Mit Kopfzeile: per Name lesen
-        raw_df.columns = [normalize_text(c) for c in raw_df.iloc[0]]
-        raw_df = raw_df.iloc[1:].reset_index(drop=True)
-        col_map = {c.lower(): c for c in raw_df.columns}
-        def get_col(name):
-            return raw_df[col_map[name.lower()]] if name.lower() in col_map else pd.Series([""] * len(raw_df))
-        df = pd.DataFrame({
-            "SAP Rahmentour": get_col("SAP Rahmentour"),
-            "CSB Tournummer": get_col("CSB Tournummer"),
-            "Wochentag":      get_col("Wochentag"),
-            "Verladetor":     get_col("Verladetor"),
-        })
-    else:
-        # Ohne Kopfzeile: feste Positionen
-        df = pd.DataFrame({
-            "SAP Rahmentour": raw_df.iloc[:, 0],
-            "CSB Tournummer": raw_df.iloc[:, 1],
-            "Wochentag":      raw_df.iloc[:, 2] if raw_df.shape[1] > 2 else "",
-            "Verladetor":     raw_df.iloc[:, 4] if raw_df.shape[1] > 4 else "",
-        })
-
-    df = df.fillna("").apply(lambda col: col.map(normalize_text))
-    df = df[df["SAP Rahmentour"] != ""].reset_index(drop=True)
-
-    validate_required_columns(df, KISOFT_REQUIRED_COLUMNS, "Kisoft-Datei")
-    return df
 
 
 def _parse_sap_range_col(value) -> tuple:
@@ -518,10 +466,10 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
 
     # Basis-Info pro (SAP_Nr, Liefertag): nimm erste Zeile
     basis_cols = ["SAP_Nr", "Liefertag", "Tourengruppe", "Kostenstelle", "Leiter",
-                  "CSB Tournummer", "Verladetor", "Rahmentour_Raw", "SAP Rahmentour",
+                  "CSB Tournummer", "Verladetor", "Rahmentour_Raw",
                   "Bestelltag", "SortKey_Bestelltag",
                   "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater", "Kategorie",
-                  "Kisoft_Key", "Liefertyp_ID", "Liefertyp_Name"]
+                  "Liefertyp_ID", "Liefertyp_Name"]
     avail_cols = [c for c in basis_cols if c in plan_rows.columns]
 
     basis = (
@@ -634,32 +582,20 @@ def prepare_dataframes(
     sap_name: str,
     transport_bytes: bytes,
     transport_name: str,
-    kisoft_bytes: bytes,
-    kisoft_name: str,
     kostenstellen_bytes: bytes,
     kostenstellen_name: str,
     csv_separator: str,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int], pd.DataFrame, pd.DataFrame]:
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int], pd.DataFrame]:
     df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
     df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
     df_transport = load_structured_upload(transport_bytes, transport_name, csv_separator, "transport")
-    df_kisoft = load_kisoft_upload(kisoft_bytes, kisoft_name, csv_separator)
     df_kostenstellen = load_kostenstellen_upload(kostenstellen_bytes, kostenstellen_name, csv_separator)
 
     # normalize_text wurde bereits in cleanup_dataframe() angewendet – kein zweiter Pass nötig.
 
-    df_sap["Kisoft_Key"] = df_sap["Rahmentour_Raw"].map(build_kisoft_key)
     df_sap["Bestelltag_Name"] = df_sap["Bestelltag"].map(day_name_from_number)
 
     df_sap = df_sap.merge(df_transport, on="Liefertyp_ID", how="left")
-
-    # Kisoft ist 1:1 pro SAP Rahmentour – einfacher Merge, keine Dedup nötig.
-    df_sap = df_sap.merge(
-        df_kisoft[["SAP Rahmentour", "CSB Tournummer", "Wochentag", "Verladetor"]],
-        left_on="Kisoft_Key",
-        right_on="SAP Rahmentour",
-        how="left",
-    )
 
     # Echte Duplikate aus SAP entfernen: gleiche SAP + Bestelltag + Sortiment + Rahmentour.
     df_sap = df_sap.drop_duplicates(
@@ -688,8 +624,8 @@ def prepare_dataframes(
     )
     plan_rows["Sortiment"] = plan_rows["Liefertyp_Name"].fillna("")
     plan_rows["Bestellzeitende"] = plan_rows["Bestellzeitende"].fillna("")
-    plan_rows["CSB Tournummer"] = plan_rows["CSB Tournummer"].fillna("")
-    plan_rows["Verladetor"] = plan_rows["Verladetor"].fillna("")
+    plan_rows["CSB Tournummer"] = ""
+    plan_rows["Verladetor"] = ""
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
     # Sortiment-Priorität: Fleisch/Heidemark zuerst, CSB-Kram zuletzt
     def _sortiment_key(name: str) -> tuple:
@@ -746,7 +682,7 @@ def prepare_dataframes(
         kunden_basis["Ort"].fillna("")
     ).str.lower()
 
-    return kunden_basis, plan_rows, counts, df_kisoft, df_sap
+    return kunden_basis, plan_rows, counts, df_sap
 
 
 
@@ -755,45 +691,17 @@ def prepare_dataframes(
 # ============================================================
 def build_debug_report(
     plan_rows: pd.DataFrame,
-    df_kisoft: pd.DataFrame,
     df_sap_raw: pd.DataFrame,
 ) -> Dict[str, pd.DataFrame]:
-    """Erstellt Qualitäts-Reports für SAP ↔ Kisoft Abgleich."""
+    """Erstellt Qualitäts-Reports für SAP-Daten."""
     reports: Dict[str, pd.DataFrame] = {}
 
     def safe_cols(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
         """Nur Spalten auswählen die wirklich vorhanden sind."""
         return df[[c for c in cols if c in df.columns]]
 
-    # 1. SAP-Zeilen ohne Kisoft-Match (kein CSB Tournummer)
+    # Direkt-Kunden (alle ohne CSB-Tour sind jetzt Direkt)
     csb_col = "CSB Tournummer"
-    if csb_col in plan_rows.columns:
-        no_kisoft = plan_rows[
-            plan_rows[csb_col].map(normalize_text) == ""
-        ]
-        reports["Kein Kisoft-Match"] = safe_cols(
-            no_kisoft, ["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Liefertag_Raw", "Liefertag", "Sortiment"]
-        ).drop_duplicates().reset_index(drop=True)
-    else:
-        reports["Kein Kisoft-Match"] = pd.DataFrame()
-
-    # 2. Liefertag-Konflikt: Spalte G weicht von CSB-Startzahl ab (vektorisiert)
-    if "Liefertag_Raw" in plan_rows.columns and csb_col in plan_rows.columns:
-        g_first   = plan_rows["Liefertag_Raw"].map(normalize_digits).str[:1]
-        csb_first = plan_rows[csb_col].map(normalize_digits).str[:1]
-        konflikt_mask = (
-            g_first.str.match(r'\d', na=False)
-            & csb_first.str.match(r'\d', na=False)
-            & (g_first != csb_first)
-        )
-        reports["Liefertag-Konflikt SAP↔CSB"] = safe_cols(
-            plan_rows[konflikt_mask],
-            ["SAP_Nr", "Name", "Rahmentour_Raw", "Liefertag_Raw", "CSB Tournummer", "Liefertag", "Sortiment"]
-        ).drop_duplicates().reset_index(drop=True)
-    else:
-        reports["Liefertag-Konflikt SAP↔CSB"] = pd.DataFrame()
-
-    # 4. Direkt-Kunden ohne CSB-Tour
     if csb_col in plan_rows.columns and "Kategorie" in plan_rows.columns:
         unklar_mask = (
             (plan_rows["Kategorie"] == "Direkt") &
@@ -801,64 +709,10 @@ def build_debug_report(
         )
         reports["Direkt ohne CSB-Tour"] = safe_cols(
             plan_rows[unklar_mask],
-            ["SAP_Nr", "Name", "Rahmentour_Raw", "Kisoft_Key", "Sortiment"]
+            ["SAP_Nr", "Name", "Rahmentour_Raw", "Sortiment"]
         ).drop_duplicates().reset_index(drop=True)
     else:
         reports["Direkt ohne CSB-Tour"] = pd.DataFrame()
-
-    # 4. Kunden mit mehreren Touren an einem Tag (verschiedene CSB Tournummern)
-    if all(c in plan_rows.columns for c in ["SAP_Nr", "Liefertag", "CSB Tournummer"]):
-        # Nur echte SAP-Zeilen (keine Zusatz-Sortimente), nur mit CSB Tour
-        _sap_only = plan_rows[
-            (plan_rows.get("_ist_zusatz", pd.Series(False, index=plan_rows.index)).fillna(False) == False)
-            & (plan_rows["CSB Tournummer"].map(normalize_text) != "")
-        ] if "_ist_zusatz" in plan_rows.columns else plan_rows[
-            plan_rows["CSB Tournummer"].map(normalize_text) != ""
-        ]
-        # Eindeutige Touren pro Kunde+Tag zählen
-        _tour_counts = (
-            _sap_only.groupby(["SAP_Nr", "Liefertag"])["CSB Tournummer"]
-            .nunique()
-            .reset_index()
-            .rename(columns={"CSB Tournummer": "Anzahl Touren"})
-        )
-        _multi = _tour_counts[_tour_counts["Anzahl Touren"] > 1]
-        # Touren gruppiert: pro Tour eine Zeile mit CSB | SAP | Kisoft zusammen
-        if not _multi.empty:
-            has_kisoft = "SAP Rahmentour" in _sap_only.columns
-
-            def _grouped_tours(grp):
-                """Pro Gruppe (SAP_Nr, Liefertag) jede einzigartige Tour als gruppierten String."""
-                seen = []
-                for _, r in grp.iterrows():
-                    csb = normalize_text(r.get("CSB Tournummer", ""))
-                    sap = normalize_text(r.get("Rahmentour_Raw", ""))
-                    kis = normalize_text(r.get("SAP Rahmentour", "")) if has_kisoft else ""
-                    parts = [p for p in [csb, sap, kis] if p]
-                    entry = " | ".join(parts)
-                    if entry and entry not in seen:
-                        seen.append(entry)
-                return ", ".join(seen)
-
-            _agg = (
-                _sap_only
-                .groupby(["SAP_Nr", "Liefertag"])
-                .apply(_grouped_tours)
-                .reset_index()
-                .rename(columns={0: "Touren (CSB | SAP | Kisoft)"})
-            )
-            _multi = _multi.merge(_agg, on=["SAP_Nr", "Liefertag"], how="left")
-            addr_cols = [c for c in ["SAP_Nr", "Name", "Strasse", "PLZ", "Ort"] if c in plan_rows.columns]
-            if addr_cols:
-                _addr = plan_rows[addr_cols].drop_duplicates("SAP_Nr")
-                _multi = _multi.merge(_addr, on="SAP_Nr", how="left")
-            _multi = _multi.sort_values(["SAP_Nr", "Liefertag"]).reset_index(drop=True)
-            cols_order = [c for c in ["SAP_Nr", "Name", "Strasse", "PLZ", "Ort", "Liefertag", "Anzahl Touren", "Touren (CSB | SAP | Kisoft)"] if c in _multi.columns]
-            reports["Mehrere Touren an einem Tag"] = _multi[cols_order]
-        else:
-            reports["Mehrere Touren an einem Tag"] = pd.DataFrame()
-    else:
-        reports["Mehrere Touren an einem Tag"] = pd.DataFrame()
 
     return reports
 
@@ -867,61 +721,11 @@ def build_debug_report(
 # MASSENDRUCK – STANDARDWOCHE & SORTIERLOGIK
 # ============================================================
 
-def build_day_assignments(
-    sw_sap_bytes: bytes,
-    sw_sap_name: str,
-    sw_kisoft_bytes: bytes,
-    sw_kisoft_name: str,
-    csv_separator: str,
-) -> dict:
-    """Erstellt Tages-Touren-Zuordnung aus Standardwoche SAP + Kisoft.
-
-    Rückgabe: dict  { sap_nr: { "1": "1004", "3": "3007", ... }, ... }
-    Schlüssel im inneren Dict = Liefertag als String ("1"=Mo … "6"=Sa).
-    Wird als JSON in die HTML eingebettet – clientseitige JS-Logik übernimmt Sortierung.
-    """
-    df_sap = load_structured_upload(sw_sap_bytes, sw_sap_name, csv_separator, "sap")
-    df_kisoft = load_kisoft_upload(sw_kisoft_bytes, sw_kisoft_name, csv_separator)
-
-    df_sap["Kisoft_Key"] = df_sap["Rahmentour_Raw"].map(build_kisoft_key)
-    df_sap["Liefertag_Num"] = (
-        df_sap["Liefertag_Raw"]
-        .map(normalize_digits)
-        .str[:1]
-        .map(lambda d: int(d) if d.isdigit() else 0)
-    )
-
-    df_merged = df_sap.merge(
-        df_kisoft[["SAP Rahmentour", "CSB Tournummer"]],
-        left_on="Kisoft_Key",
-        right_on="SAP Rahmentour",
-        how="left",
-    )
-    df_merged["CSB Tournummer"] = df_merged["CSB Tournummer"].fillna("").map(normalize_text)
-
-    df_clean = (
-        df_merged[df_merged["Liefertag_Num"].between(1, 6) & (df_merged["CSB Tournummer"] != "")]
-        [["SAP_Nr", "Liefertag_Num", "CSB Tournummer"]]
-        .sort_values(["SAP_Nr", "Liefertag_Num", "CSB Tournummer"])
-        .drop_duplicates(subset=["SAP_Nr", "Liefertag_Num"])
-    )
-
-    result: dict = {}
-    for _, row in df_clean.iterrows():
-        sap = normalize_text(row["SAP_Nr"])
-        day = str(int(row["Liefertag_Num"]))
-        csb = normalize_text(row["CSB Tournummer"])
-        if sap:
-            result.setdefault(sap, {})[day] = csb
-
-    return result
-
-
 def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
     """Zeigt Debug-Reports im Streamlit-Tab."""
     total_issues = sum(len(df) for df in reports.values())
     if total_issues == 0:
-        st.success("✅ Keine Auffälligkeiten gefunden – SAP und Kisoft sind konsistent.")
+        st.success("✅ Keine Auffälligkeiten gefunden.")
         return
 
     # Gesamt-Export aller Reports als Excel (ein Sheet pro Report)
@@ -2839,7 +2643,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         </div>
         <div class="debug-panel" id="debug-panel">
             <div class="debug-panel-header">
-                <div class="debug-panel-title">&#128269; SAP &harr; Kisoft Debug</div>
+                <div class="debug-panel-title">&#128269; SAP Debug</div>
                 <button class="debug-close" onclick="toggleDebug()">&#10005;</button>
             </div>
             {debug_html if debug_html else '<p style="color:#666;font-size:12px">Keine Debug-Daten vorhanden.</p>'}
@@ -2900,7 +2704,6 @@ def upload_status_lines(upload_map: Dict[str, Optional[object]]) -> str:
         "kunden": "Kundenliste",
         "sap": "SAP",
         "transport": "Transportgruppen",
-        "kisoft": "Kisoft",
         "kostenstellen": "Kostenstellen",
     }
     lines = []
@@ -2945,7 +2748,6 @@ def show_onboarding(upload_map: Dict[str, Optional[object]]) -> None:
                 <li>Kundenliste: A, I, J, K, L, M, N</li>
                 <li>SAP-Datei: A, H, I, O, Y</li>
                 <li>Transportgruppen: A, C</li>
-                <li>Kisoft: SAP Rahmentour, CSB Tournummer, Verladetor</li>
                 <li>Kostenstellen: A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter</li>
             </ul>
             """,
@@ -3048,44 +2850,27 @@ def main() -> None:
     st.divider()
 
     # ── Uploads ──
-    col_left, col_mid, col_right = st.columns(3, gap="medium")
+    col_left, col_right = st.columns(2, gap="medium")
     with col_left:
         kunden_file = st.file_uploader("Kundenliste", type=["xlsx", "xls", "xlsm", "csv"],
                                         help="Spalten: A, I, J, K, L, M, N")
         sap_file = st.file_uploader("SAP-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                      help="Spalten: A, G, H, I, O, Y")
+    with col_right:
         transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
                                           help="Spalten: A, C")
-    with col_mid:
-        kisoft_file = st.file_uploader("Kisoft-Datei", type=["csv", "xlsx", "xls", "xlsm"],
-                                        help="SAP Rahmentour, CSB Tournummer, Verladetor")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                               help="A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter")
-        logo_file = st.file_uploader(
-            "Druck-Logo (Sendeplan)",
-            type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
-            key="print_logo",
-            help="Logo oben rechts auf jedem gedruckten Sendeplan (unabhängig vom App-Logo)",
-        )
-    with col_right:
-        st.markdown("**📅 Massendruck – Standardwoche** *(optional)*")
-        st.caption("Liefert Toursortiering für den Massendruck im HTML-Export.")
-        sw_sap_file = st.file_uploader(
-            "SAP Standardwoche",
-            type=["xlsx", "xls", "xlsm", "csv"],
-            key="sw_sap",
-            help="SAP-Referenzwoche für Liefertag-Sortierung",
-        )
-        sw_kisoft_file = st.file_uploader(
-            "Kisoft Standardwoche",
-            type=["csv", "xlsx", "xls", "xlsm"],
-            key="sw_kisoft",
-            help="Kisoft-Referenzwoche für CSB-Tournummern",
-        )
+    logo_file = st.file_uploader(
+        "Druck-Logo (Sendeplan)",
+        type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
+        key="print_logo",
+        help="Logo oben rechts auf jedem gedruckten Sendeplan (unabhängig vom App-Logo)",
+    )
 
     upload_map = {
         "kunden": kunden_file, "sap": sap_file, "transport": transport_file,
-        "kisoft": kisoft_file, "kostenstellen": kostenstellen_file,
+        "kostenstellen": kostenstellen_file,
     }
 
     # ── CSV-Trennzeichen ──
@@ -3101,18 +2886,18 @@ def main() -> None:
     uploaded = sum(1 for v in upload_map.values() if v is not None)
     file_names = [f'<span class="status-ok">✓ {html.escape(v.name)}</span>' if v else '<span class="status-miss">✗ fehlt</span>'
                   for k, v in upload_map.items()]
-    labels = ["Kunden", "SAP", "Transport", "Kisoft", "Kostenstellen"]
+    labels = ["Kunden", "SAP", "Transport", "Kostenstellen"]
     status_parts = [f"{l}: {f}" for l, f in zip(labels, file_names)]
     st.markdown(f"<p style='font-size:0.85rem;margin:0.5rem 0;'>{'&ensp;·&ensp;'.join(status_parts)}</p>", unsafe_allow_html=True)
 
     if not all_required_uploads_present(upload_map):
-        st.info("Alle 5 Dateien hochladen, dann erscheint der Button.")
+        st.info("Alle 4 Dateien hochladen, dann erscheint der Button.")
         return
 
     # ── Daten verarbeiten (csv_separator kommt aus Selectbox oben) ──
     try:
         _hasher = hashlib.md5()
-        for _f in (kunden_file, sap_file, transport_file, kisoft_file, kostenstellen_file):
+        for _f in (kunden_file, sap_file, transport_file, kostenstellen_file):
             _hasher.update(_f.getvalue())
         _hasher.update(csv_separator.encode())
         _cache_key = _hasher.hexdigest()
@@ -3122,7 +2907,6 @@ def main() -> None:
                 kunden_file.getvalue(), kunden_file.name,
                 sap_file.getvalue(), sap_file.name,
                 transport_file.getvalue(), transport_file.name,
-                kisoft_file.getvalue(), kisoft_file.name,
                 kostenstellen_file.getvalue(), kostenstellen_file.name,
                 csv_separator,
             )
@@ -3131,7 +2915,7 @@ def main() -> None:
             st.session_state["_export_ready"] = False  # alte HTML verwerfen
 
         (customers_df, plan_rows_df, counts,
-         df_kisoft_debug, df_sap_debug) = st.session_state["_df_cache_result"]
+         df_sap_debug) = st.session_state["_df_cache_result"]
     except Exception as exc:
         st.error(f"Fehler beim Verarbeiten: {exc}")
         return
@@ -3139,7 +2923,7 @@ def main() -> None:
     # Debug-Reports cachen
     _data_key = st.session_state.get("_df_cache_key", "")
     if st.session_state.get("_debug_cache_key") != _data_key:
-        st.session_state["_debug_reports"] = build_debug_report(plan_rows_df, df_kisoft_debug, df_sap_debug)
+        st.session_state["_debug_reports"] = build_debug_report(plan_rows_df, df_sap_debug)
         st.session_state["_debug_cache_key"] = _data_key
     debug_reports = st.session_state["_debug_reports"]
 
@@ -3162,25 +2946,6 @@ def main() -> None:
         sidebar_logo_mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                              "svg": "image/svg+xml", "gif": "image/gif", "webp": "image/webp"}.get(ext2, "image/png")
 
-    # ── Massendruck-Daten vorbereiten (gecacht) ──
-    md_data = None
-    if sw_sap_file and sw_kisoft_file:
-        try:
-            _sw_hasher = hashlib.md5()
-            _sw_hasher.update(sw_sap_file.getvalue())
-            _sw_hasher.update(sw_kisoft_file.getvalue())
-            _sw_key = _sw_hasher.hexdigest()
-            if st.session_state.get("_sw_cache_key") != _sw_key:
-                st.session_state["_day_assignments"] = build_day_assignments(
-                    sw_sap_file.getvalue(), sw_sap_file.name,
-                    sw_kisoft_file.getvalue(), sw_kisoft_file.name,
-                    csv_separator,
-                )
-                st.session_state["_sw_cache_key"] = _sw_key
-            md_data = st.session_state.get("_day_assignments")
-        except Exception as exc:
-            st.warning(f"Standardwoche konnte nicht verarbeitet werden: {exc}")
-
     st.divider()
 
     # ── Tabs: Plan | Vorschau | Debug ──
@@ -3194,8 +2959,6 @@ def main() -> None:
         st.markdown(
             f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen · {' · '.join(cat_parts)}"
         )
-        if md_data:
-            st.caption("✓ Standardwoche geladen – Massendruck-Sortierung im HTML verfügbar.")
 
         include_sep = st.checkbox(
             "Trennseiten einfügen (Separator-Pages vor jedem Kunden)",
@@ -3215,7 +2978,6 @@ def main() -> None:
                     logo_b64=logo_b64, logo_mime=logo_mime,
                     sidebar_logo_b64=sidebar_logo_b64, sidebar_logo_mime=sidebar_logo_mime,
                     debug_data=debug_reports,
-                    massendruck_data=md_data,
                 )
             progress.progress(100, text="Fertig!")
             st.session_state["_export_html"] = bulk_html
