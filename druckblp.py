@@ -1457,7 +1457,7 @@ def export_css() -> str:
                 margin: 0 !important; padding: 0 !important;
                 display: block !important;
             }
-            .sidebar { display: none !important; }
+            .sidebar, .mobile-toggle { display: none !important; }
             .main-content { width: 210mm !important; }
             .page-stack { padding: 0 !important; }
 
