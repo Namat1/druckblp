@@ -44,14 +44,17 @@ SORTIMENT_PRIO = {
 }
 SORTIMENT_ZUSATZ_KEYWORDS = ("avo", "werbemittel", "hamburger jungs", "lagerware")
 
-# Zusatz-Sortimente: (Spaltenindex Name, Anzeigename)
-# Uhrzeit = Name+1, Tag = Name+2. Nur hinzufügen wenn BEIDE gefüllt.
+# Zusatz-Sortimente aus KSP "CSB Standard" Sheet.
+# Spalte A = Liefertag (1=Mo..6=Sa), B = KSP-Schlüssel.
+# Danach je 3 Spalten pro Sortiment: Name | Uhrzeit | Bestelltag
+# C/D/E = Lagerware, F/G/H = AVO, I/J/K = WM Sonder, L/M/N = WM, O/P/Q = HJ
+# Nur hinzufügen wenn Uhrzeit UND Tag vorhanden.
 KST_ZUSATZ_GRUPPEN = [
-    (3,  "Lagerware"),
-    (6,  "AVO"),
-    (9,  "Werbemittel Sonder"),
-    (12, "Werbemittel"),
-    (15, "Hamburger Jungs"),
+    (2,  "Lagerware"),
+    (5,  "AVO"),
+    (8,  "Werbemittel Sonder"),
+    (11, "Werbemittel"),
+    (14, "Hamburger Jungs"),
 ]
 
 TAG_ABKUERZUNGEN = {
@@ -242,16 +245,31 @@ def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str,
 # Zuordnung über KSP-Schlüssel (SAP Spalte P → KSP Spalte B) + Liefertag
 
 def _parse_kst_time(val) -> str:
-    """Wandelt z.B. 915 -> '09:15', 1045 -> '10:45', 2045 -> '20:45'."""
+    """Wandelt verschiedene Zeit-Formate in 'HH:MM'.
+
+    Erkennt: 915 -> '09:15', 2000 -> '20:00', '9:00' -> '09:00',
+    '20:00' -> '20:00', datetime.time(9,0) -> '09:00'.
+    """
     if val is None:
         return ""
+    # datetime.time Objekt (kommt aus openpyxl bei formatierten Zellen)
+    if hasattr(val, "hour") and hasattr(val, "minute"):
+        return f"{val.hour:02d}:{val.minute:02d}"
+    text = str(val).strip()
+    if not text:
+        return ""
+    # Bereits im Format "H:MM" oder "HH:MM"?
+    m = re.match(r'^(\d{1,2}):(\d{2})$', text)
+    if m:
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+    # Numerisch: 900 -> '09:00', 2000 -> '20:00'
     try:
-        n = int(float(str(val).strip()))
+        n = int(float(text))
     except (ValueError, TypeError):
         return ""
     if n <= 0:
         return ""
-    s = f"{n:04d}"  # pad to 4 digits
+    s = f"{n:04d}"
     return f"{s[:2]}:{s[2:]}"
 
 
@@ -267,10 +285,12 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
     """Extrahiert den Bestellplan fuer Zusatz-Sortimente (AVO, Werbemittel, …)
     aus dem Kostenstellenplan CSB Standard.
 
-    Neues Layout:  A=Gruppennr, B=KSP-Schlüssel (Join-Key zu SAP.P), C=Tourname
-    Dann je 3 Spalten pro Sortiment: Name | Uhrzeit | Bestelltag
-      D/E/F = Lagerware, G/H/I = AVO, J/K/L = Werbemittel Sonder,
-      M/N/O = Werbemittel, P/Q/R = Hamburger Jungs
+    Flaches Layout – jede Zeile ist eine Tour:
+      A = Liefertag (1=Mo … 6=Sa)
+      B = KSP-Schlüssel (Join-Key zu SAP Spalte P)
+      Dann je 3 Spalten pro Sortiment: Name | Uhrzeit | Bestelltag
+        C/D/E = Lagerware, F/G/H = AVO, I/J/K = WM Sonder,
+        L/M/N = Werbemittel, O/P/Q = Hamburger Jungs
 
     Sortiment wird NUR erzeugt wenn BEIDE (Uhrzeit + Tag) gefüllt sind.
 
@@ -282,27 +302,23 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
     ws = wb["CSB Standard"]
     all_rows = list(ws.iter_rows(values_only=True))
-
-    skip_tokens = ("lieferanten", "normale touren", "tourengruppen", "tourengruppe")
-    current_day = ""
     records = []
 
     for row in all_rows:
-        a = normalize_text(row[0]) if row[0] is not None else ""
-        d = row[3] if len(row) > 3 else None
-
-        # Kopfzeile erkennen (Abschnitt pro Liefertag)
-        if a.lower() == "tourengruppen":
-            current_day = normalize_text(d).capitalize() if d else ""
+        if not row or len(row) < 3:
             continue
 
-        # Zeilen ohne aktuellen Tag überspringen
-        if not a or not current_day:
-            continue
-        if any(a.lower().startswith(t) for t in skip_tokens):
-            continue
+        # Spalte A = Liefertag als Zahl (1=Mo … 6=Sa)
+        a_raw = row[0]
+        try:
+            liefertag_num = int(float(str(a_raw).strip()))
+        except (ValueError, TypeError):
+            continue  # Kopf-/Leerzeile
+        liefertag_name = WOCHENTAGE.get(liefertag_num)
+        if not liefertag_name:
+            continue  # ungültige Zahl
 
-        # Spalte B = KSP-Schlüssel (Join-Key)
+        # Spalte B = KSP-Schlüssel
         b = row[1] if len(row) > 1 else None
         if b is None:
             continue
@@ -310,7 +326,7 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
         if not ksp_key:
             continue
 
-        # Für jede Zusatz-Gruppe: (name_col_idx, sortiment_name)
+        # Für jede Zusatz-Gruppe: (col_start, sortiment_name)
         for col_start, sortiment_name in KST_ZUSATZ_GRUPPEN:
             time_col = col_start + 1
             day_col  = col_start + 2
@@ -329,7 +345,7 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
             records.append({
                 "ksp_schluessel":  ksp_key,
-                "liefertag":       current_day,
+                "liefertag":       liefertag_name,
                 "sortiment":       sortiment_name,
                 "bestelltag":      bestelltag,
                 "bestellzeitende": bestellzeitende,
