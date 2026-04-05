@@ -1326,55 +1326,63 @@ def export_css() -> str:
 
 
 def render_tour_overview(customer_rows: pd.DataFrame) -> str:
-    """Baut die Tourübersicht-Tabelle: Liefertag -> alle CSB-Tournummern."""
+    """Baut die Tourübersicht: Liefertag -> optional CSB-Tournummern."""
     if customer_rows.empty:
         return ""
 
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
-    # Effizient: nur Zeilen mit CSB-Tour (Daten sind bereits normalisiert)
+    # Alle Liefertage aus plan_rows sammeln (unabhängig von CSB)
+    all_days = set(
+        d for d in customer_rows["Liefertag"].dropna().unique()
+        if d and d != "Unbekannt"
+    )
+
+    # CSB-Touren pro Tag (falls vorhanden)
+    tour_by_day: dict = {}
     csb_col = customer_rows["CSB Tournummer"].fillna("")
     relevant = customer_rows[csb_col != ""].copy()
-    if relevant.empty:
+    if not relevant.empty:
+        csb_first_digit = relevant["CSB Tournummer"].str.extract(r'^(\d)', expand=False).fillna("")
+        relevant["_day"] = csb_first_digit.map(
+            lambda d: WOCHENTAGE.get(int(d), "") if d.isdigit() else ""
+        )
+        fallback_mask = relevant["_day"] == ""
+        relevant.loc[fallback_mask, "_day"] = relevant.loc[fallback_mask, "Liefertag"].fillna("")
+        relevant = relevant[relevant["_day"] != ""]
+
+        for day, grp in relevant.groupby("_day", sort=False):
+            unique_tours = list(dict.fromkeys(
+                t for t in grp["CSB Tournummer"].tolist() if t
+            ))
+            if unique_tours:
+                tour_by_day[day] = unique_tours
+                all_days.add(day)
+
+    if not all_days:
         return ""
 
-    # Vectorisiert: Liefertag aus erster Ziffer der CSB-Tournummer ableiten
-    csb_first_digit = relevant["CSB Tournummer"].str.extract(r'^(\d)', expand=False).fillna("")
-    relevant["_day"] = csb_first_digit.map(
-        lambda d: WOCHENTAGE.get(int(d), "") if d.isdigit() else ""
-    )
-    # Fallback: Liefertag-Spalte wo CSB keinen Tag liefert
-    fallback_mask = relevant["_day"] == ""
-    relevant.loc[fallback_mask, "_day"] = relevant.loc[fallback_mask, "Liefertag"].fillna("")
-    relevant = relevant[relevant["_day"] != ""]
-
-    tour_by_day: dict = {}
-    for day, grp in relevant.groupby("_day", sort=False):
-        unique_tours = list(dict.fromkeys(
-            t for t in grp["CSB Tournummer"].tolist() if t
-        ))
-        if unique_tours:
-            tour_by_day[day] = unique_tours
-
-    if not tour_by_day:
-        return ""
-
-    days_present = [d for d in day_order if d in tour_by_day]
+    days_present = [d for d in day_order if d in all_days]
     n_cols = len(days_present)
     label_w = "18mm"
     col_w = f"calc((100% - {label_w}) / {n_cols})"
     day_spans = "".join(
         f'<span style="display:inline-block;width:{col_w}">{html.escape(d)}</span>' for d in days_present
     )
-    tour_spans = "".join(
-        f'<span style="display:inline-block;width:{col_w}">{"  ".join(html.escape(t) for t in tour_by_day[d])}</span>'
-        for d in days_present
-    )
+
+    # Tour-Zeile nur wenn CSB-Daten vorhanden
+    tour_line = ""
+    if tour_by_day:
+        tour_spans = "".join(
+            f'<span style="display:inline-block;width:{col_w}">{"  ".join(html.escape(t) for t in tour_by_day.get(d, []))}</span>'
+            for d in days_present
+        )
+        tour_line = f'<div><strong style="display:inline-block;width:{label_w}">Tour:</strong>{tour_spans}</div>'
 
     return f"""
     <div style="font-size:9pt; margin-bottom:2.5mm; line-height:1.6;">
         <div><strong style="display:inline-block;width:{label_w}">Liefertag:</strong>{day_spans}</div>
-        <div><strong style="display:inline-block;width:{label_w}">Tour:</strong>{tour_spans}</div>
+        {tour_line}
     </div>
     """
 
