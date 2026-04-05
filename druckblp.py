@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import numpy as np
 import openpyxl
 import pandas as pd
 import streamlit as st
@@ -35,20 +34,7 @@ WOCHENTAGE = {
     6: "Samstag",
 }
 
-KATEGORIEN = ["Alle", "MK", "Malchow", "NMS", "SuL", "Direkt"]
-
-# Tourenklassifikation: CSB-Tournummern → Depot-Kategorie
-DEPOT_CONFIG = {
-    "sul_touren": {"1058", "2058", "3058", "4058", "5058", "6030",
-                   "14444", "24444", "34444", "44444", "54444"},
-    "muster": [
-        # (Muster im CSB-String, Kategorie)  – Reihenfolge = Priorität
-        ("88",  "MK"),
-        ("777", "Malchow"),
-        ("222", "NMS"),
-    ],
-    "fallback": "Direkt",
-}
+# Keine Depot-Kategorien mehr – Sortiment-Zuordnung läuft nur noch über KSP-Schlüssel.
 
 # Sortiment-Reihenfolge im Sendeplan
 SORTIMENT_PRIO = {
@@ -56,14 +42,16 @@ SORTIMENT_PRIO = {
     "fleisch- & wurst sb":        1,
     "heidemark":                  2,
 }
-SORTIMENT_ZUSATZ_KEYWORDS = ("avo", "werbemittel", "hamburger jungs")
+SORTIMENT_ZUSATZ_KEYWORDS = ("avo", "werbemittel", "hamburger jungs", "lagerware")
 
-# Zusatz-Sortimente: (Spaltenindex T.Zeit, Fallback-Bestellzeitende, Anzeigename)
+# Zusatz-Sortimente: (Spaltenindex Name, Anzeigename)
+# Uhrzeit = Name+1, Tag = Name+2. Nur hinzufügen wenn BEIDE gefüllt.
 KST_ZUSATZ_GRUPPEN = [
-    (7,  "09:00", "AVO-Gewürze"),
-    (10, "09:00", "Werbemittel-Sonder"),
-    (13, "09:00", "Werbemittel"),
-    (16, "09:00", "Hamburger Jungs"),
+    (3,  "Lagerware"),
+    (6,  "AVO"),
+    (9,  "Werbemittel Sonder"),
+    (12, "Werbemittel"),
+    (15, "Hamburger Jungs"),
 ]
 
 TAG_ABKUERZUNGEN = {
@@ -89,16 +77,17 @@ UPLOAD_CONFIG = {
     },
     "sap": {
         "label": "SAP-Datei hochladen",
-        "help": "Verwendet feste Excel-Spalten: A, G, H, I, O, Y",
+        "help": "Verwendet feste Excel-Spalten: A, G, H, I, O, P, Y",
         "mapping": {
             "SAP_Nr": "A",
             "Liefertag_Raw": "G",
             "Bestelltag": "H",
             "Bestellzeitende": "I",
             "Liefertyp_ID": "O",
+            "KSP_Schluessel": "P",
             "Rahmentour_Raw": "Y",
         },
-        "required": ["SAP_Nr", "Liefertag_Raw", "Bestelltag", "Bestellzeitende", "Liefertyp_ID", "Rahmentour_Raw"],
+        "required": ["SAP_Nr", "Liefertag_Raw", "Bestelltag", "Bestellzeitende", "Liefertyp_ID", "KSP_Schluessel", "Rahmentour_Raw"],
         "key": "SAP_Nr",
     },
     "transport": {
@@ -113,7 +102,7 @@ UPLOAD_CONFIG = {
     },
 }
 
-KOSTENSTELLEN_REQUIRED_COLUMNS = ["sap_von", "sap_bis", "tourengruppe", "kostenstelle", "leiter"]
+# (Kostenstellenplan wird nur noch für Zusatz-Sortimente via CSB Standard Sheet genutzt.)
 
 
 # ============================================================
@@ -137,20 +126,6 @@ def day_name_from_number(value) -> str:
     except (TypeError, ValueError):
         return "Unbekannt"
 
-
-def classify_by_csb_tour(csb_tour: str) -> str:
-    """Klassifiziert anhand der CSB-Tournummer.
-
-    Priorität: SuL > MK (X88X) > Malchow (X777X) > NMS (X222X) > Direkt
-    Konfiguration kommt aus DEPOT_CONFIG.
-    """
-    csb = normalize_digits(csb_tour)
-    if csb in DEPOT_CONFIG["sul_touren"]:
-        return "SuL"
-    for muster, kategorie in DEPOT_CONFIG["muster"]:
-        if muster in csb:
-            return kategorie
-    return DEPOT_CONFIG["fallback"]
 
 
 
@@ -258,110 +233,13 @@ def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str,
     return structured_df
 
 
-def _parse_sap_range_col(value) -> tuple:
-    """Parst den SAP-Bereich aus Spalte B des Kostenstellenplans.
-
-    Formate: '12221-14444', '1881 - 1886', '1001-1046 + 58', 5883 (Einzelwert)
-    Toleriert None, float NaN und den String 'nan' (entsteht bei dtype=str).
-    """
-    if value is None:
-        return ("", "")
-    if isinstance(value, float):
-        if pd.isna(value):
-            return ("", "")
-        # numerischer Einzelwert (z.B. 5883.0)
-        text = str(int(value))
-    else:
-        text = str(value).strip()
-    # leere oder NaN-artige Strings
-    if not text or text.lower() in ("nan", "none", ""):
-        return ("", "")
-    text = re.sub(r'\s*\+.*$', '', text).strip()
-    parts = re.split(r'\s*-\s*', text, maxsplit=1)
-    if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-        return (parts[0].strip(), parts[1].strip())
-    if text.isdigit():
-        return (text, text)
-    return ("", "")
-
-
-def load_kostenstellen_upload(file_bytes: bytes, filename: str, csv_separator: str) -> pd.DataFrame:
-    """Liest den Kostenstellenplan.
-
-    Feste Spaltenreihenfolge:
-      A = Tourengruppe  (z.B. 'HP-NMS/Zar', 'Direkt Früh')
-      B = SAP-Bereich   (z.B. '12221-14444', '1001-1046 + 58', 5883)
-      C = Kostenstelle  (z.B. 10, 41)
-      D = Leiter        (z.B. 13, 43)
-
-    Lookup erfolgt später über die CSB-Tournummer (z.B. 4007 liegt in 4001-4058).
-    """
-    suffix = Path(filename).suffix.lower()
-
-    if suffix == ".csv":
-        # CSV: nur ein Blatt, direkt lesen
-        raw_df = read_upload_to_raw_dataframe(file_bytes, filename, csv_separator)
-    else:
-        # Excel: richtiges Sheet suchen (enthaelt numerische SAP-Bereiche in Spalte B)
-        _wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
-        _chosen = None
-        for _sname in _wb.sheetnames:
-            _ws = _wb[_sname]
-            for _row in _ws.iter_rows(max_row=20, values_only=True):
-                _b = str(_row[1]).strip() if len(_row) > 1 and _row[1] is not None else ""
-                if re.search(r'\d{4,}', _b):  # SAP-Bereich hat mind. 4 Ziffern
-                    _chosen = _sname
-                    break
-            if _chosen:
-                break
-        if _chosen is None:
-            _chosen = _wb.sheetnames[0]
-        raw_df = pd.read_excel(io.BytesIO(file_bytes), sheet_name=_chosen, header=None, dtype=str, keep_default_na=False)
-
-    if raw_df.shape[1] < 4:
-        raise ValueError("Kostenstellen-Datei benoetigt mindestens 4 Spalten (A-D).")
-
-    records = []
-    skip_tokens = ("lieferanten", "normale touren", "tourengruppen", "tourengruppe")
-    for _, row in raw_df.iterrows():
-        tourengruppe = normalize_text(row.iloc[0])
-        sap_bereich  = row.iloc[1]
-        kostenstelle = normalize_text(row.iloc[2])
-        leiter       = normalize_text(row.iloc[3])
-
-        if not tourengruppe:
-            continue
-        if any(tourengruppe.lower().startswith(t) for t in skip_tokens):
-            continue
-
-        sap_von, sap_bis = _parse_sap_range_col(sap_bereich)
-        if not sap_von:
-            continue
-
-        records.append({
-            "tourengruppe": tourengruppe,
-            "sap_von":      sap_von,
-            "sap_bis":      sap_bis,
-            "kostenstelle": kostenstelle,
-            "leiter":       leiter,
-        })
-
-    if not records:
-        raise ValueError(
-            "Kostenstellenplan: Keine Datenzeilen gefunden. "
-            "Spaltenreihenfolge pruefen: A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter."
-        )
-
-    df = pd.DataFrame(records)
-    validate_required_columns(df, KOSTENSTELLEN_REQUIRED_COLUMNS, "Kostenstellen-Datei")
-    return df
 
 
 # ============================================================
 # ZUSATZ-SORTIMENTE AUS KOSTENSTELLENPLAN (AVO, WERBEMITTEL …)
 # ============================================================
 
-# Liefertyp-Gruppen nutzen zentrale KST_ZUSATZ_GRUPPEN-Konfiguration
+# Zuordnung über KSP-Schlüssel (SAP Spalte P → KSP Spalte B) + Liefertag
 
 def _parse_kst_time(val) -> str:
     """Wandelt z.B. 915 -> '09:15', 1045 -> '10:45', 2045 -> '20:45'."""
@@ -389,11 +267,18 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
     """Extrahiert den Bestellplan fuer Zusatz-Sortimente (AVO, Werbemittel, …)
     aus dem Kostenstellenplan CSB Standard.
 
-    Ergebnis-DataFrame: tourengruppe | liefertag | sortiment | bestelltag | bestellzeitende
+    Neues Layout:  A=Gruppennr, B=KSP-Schlüssel (Join-Key zu SAP.P), C=Tourname
+    Dann je 3 Spalten pro Sortiment: Name | Uhrzeit | Bestelltag
+      D/E/F = Lagerware, G/H/I = AVO, J/K/L = Werbemittel Sonder,
+      M/N/O = Werbemittel, P/Q/R = Hamburger Jungs
+
+    Sortiment wird NUR erzeugt wenn BEIDE (Uhrzeit + Tag) gefüllt sind.
+
+    Ergebnis-DataFrame: ksp_schluessel | liefertag | sortiment | bestelltag | bestellzeitende
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
     if "CSB Standard" not in wb.sheetnames:
-        return pd.DataFrame(columns=["tourengruppe","liefertag","sortiment","bestelltag","bestellzeitende"])
+        return pd.DataFrame(columns=["ksp_schluessel","liefertag","sortiment","bestelltag","bestellzeitende"])
 
     ws = wb["CSB Standard"]
     all_rows = list(ws.iter_rows(values_only=True))
@@ -406,51 +291,52 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
         a = normalize_text(row[0]) if row[0] is not None else ""
         d = row[3] if len(row) > 3 else None
 
-        # Kopfzeile erkennnen
+        # Kopfzeile erkennen (Abschnitt pro Liefertag)
         if a.lower() == "tourengruppen":
             current_day = normalize_text(d).capitalize() if d else ""
             continue
 
-        # Zeilen ohne Tourengruppe oder ohne aktuellen Tag überspringen
+        # Zeilen ohne aktuellen Tag überspringen
         if not a or not current_day:
             continue
         if any(a.lower().startswith(t) for t in skip_tokens):
             continue
 
-        # Brauchen SAP-Bereich (B) zur Validierung dass es eine Datenzeile ist
+        # Spalte B = KSP-Schlüssel (Join-Key)
         b = row[1] if len(row) > 1 else None
         if b is None:
             continue
-        b_str = str(b).strip()
-        if not re.search(r'\d', b_str):
+        ksp_key = normalize_text(b)
+        if not ksp_key:
             continue
 
-        # Für jede Zusatz-Gruppe
-        for col_start, zeit_fallback, sortiment_name in KST_ZUSATZ_GRUPPEN:
-            if len(row) <= col_start + 2:
+        # Für jede Zusatz-Gruppe: (name_col_idx, sortiment_name)
+        for col_start, sortiment_name in KST_ZUSATZ_GRUPPEN:
+            time_col = col_start + 1
+            day_col  = col_start + 2
+            if len(row) <= day_col:
                 continue
-            zeit_val  = row[col_start]       # Abfahrtszeit
-            tag_val   = row[col_start + 2]   # Bestelltag-Kuerzel
 
-            if zeit_val is None and tag_val is None:
-                continue  # kein Eintrag fuer diese Gruppe
+            zeit_val = row[time_col]
+            tag_val  = row[day_col]
 
-            bestellzeitende = _parse_kst_time(zeit_val) or zeit_fallback
+            # NUR wenn BEIDE gefüllt
+            bestellzeitende = _parse_kst_time(zeit_val)
             bestelltag      = _parse_kst_tag(tag_val)
 
-            if not bestelltag:
+            if not bestellzeitende or not bestelltag:
                 continue
 
             records.append({
-                "tourengruppe":   a,
-                "liefertag":      current_day,
-                "sortiment":      sortiment_name,
-                "bestelltag":     bestelltag,
+                "ksp_schluessel":  ksp_key,
+                "liefertag":       current_day,
+                "sortiment":       sortiment_name,
+                "bestelltag":      bestelltag,
                 "bestellzeitende": bestellzeitende,
             })
 
     return pd.DataFrame(records) if records else pd.DataFrame(
-        columns=["tourengruppe","liefertag","sortiment","bestelltag","bestellzeitende"]
+        columns=["ksp_schluessel","liefertag","sortiment","bestelltag","bestellzeitende"]
     )
 
 
@@ -458,17 +344,20 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
     """Generiert synthetische Planzeilen fuer AVO, Werbemittel etc.
 
     Fuer jede einzigartige (SAP_Nr, Liefertag) Kombination in plan_rows wird geprueft,
-    ob es passende Eintraege in zusatz_schedule gibt (via Tourengruppe x Liefertag).
+    ob es passende Eintraege in zusatz_schedule gibt (via KSP_Schluessel x Liefertag).
     Falls ja, wird eine neue Zeile erzeugt und angehaengt.
     """
     if zusatz_schedule.empty or plan_rows.empty:
         return plan_rows
 
+    if "KSP_Schluessel" not in plan_rows.columns:
+        return plan_rows
+
     # Basis-Info pro (SAP_Nr, Liefertag): nimm erste Zeile
-    basis_cols = ["SAP_Nr", "Liefertag", "Tourengruppe", "Kostenstelle", "Leiter",
+    basis_cols = ["SAP_Nr", "Liefertag", "KSP_Schluessel",
                   "CSB Tournummer", "Verladetor", "Rahmentour_Raw",
                   "Bestelltag", "SortKey_Bestelltag",
-                  "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater", "Kategorie",
+                  "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater",
                   "Liefertyp_ID", "Liefertyp_Name"]
     avail_cols = [c for c in basis_cols if c in plan_rows.columns]
 
@@ -480,19 +369,19 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
 
     # Normalize für Merge
     sched = zusatz_schedule.copy()
-    sched["_tg_norm"] = sched["tourengruppe"].str.strip().str.lower()
-    sched["_lt_norm"] = sched["liefertag"].str.strip().str.lower()
-    basis["_tg_norm"] = basis["Tourengruppe"].str.strip().str.lower()
-    basis["_lt_norm"] = basis["Liefertag"].str.strip().str.lower()
+    sched["_ksp_norm"] = sched["ksp_schluessel"].str.strip().str.lower()
+    sched["_lt_norm"]  = sched["liefertag"].str.strip().str.lower()
+    basis["_ksp_norm"] = basis["KSP_Schluessel"].str.strip().str.lower()
+    basis["_lt_norm"]  = basis["Liefertag"].str.strip().str.lower()
 
-    # Leere Tourengruppen / Liefertage ausfiltern
-    basis = basis[(basis["_tg_norm"] != "") & (basis["_lt_norm"] != "")]
+    # Leere KSP-Schlüssel / Liefertage ausfiltern
+    basis = basis[(basis["_ksp_norm"] != "") & (basis["_lt_norm"] != "")]
 
     if basis.empty:
         return plan_rows
 
-    # Merge statt doppeltem iterrows
-    merged = basis.merge(sched, on=["_tg_norm", "_lt_norm"], how="inner")
+    # Merge über KSP_Schluessel + Liefertag
+    merged = basis.merge(sched, on=["_ksp_norm", "_lt_norm"], how="inner")
 
     if merged.empty:
         return plan_rows
@@ -505,7 +394,7 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
     merged["_ist_zusatz"] = True
 
     # Aufräumen: nur plan_rows-Spalten behalten, Rest auffüllen
-    drop_cols = ["_tg_norm", "_lt_norm", "tourengruppe", "liefertag", "sortiment",
+    drop_cols = ["_ksp_norm", "_lt_norm", "ksp_schluessel", "liefertag", "sortiment",
                  "bestelltag", "bestellzeitende"]
     merged = merged.drop(columns=[c for c in drop_cols if c in merged.columns], errors="ignore")
 
@@ -517,62 +406,7 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
     return combined
 
 
-# ============================================================
-# LOOKUP UND AUFBEREITUNG
-# ============================================================
-def apply_kostenstellen_lookup(df_plan: pd.DataFrame, df_kostenstellen: pd.DataFrame) -> pd.DataFrame:
-    """Ergaenzt Tourengruppe, Kostenstelle und Leiter anhand der CSB-Tournummer.
 
-    Der Kostenstellenplan enthaelt numerische Bereiche (sap_von/sap_bis).
-    Die CSB-Tournummer (4-stellig, z.B. 4007) wird numerisch gegen diese
-    Bereiche geprueft. Vectorisiert via numpy Broadcasting.
-    """
-    table = df_kostenstellen.copy()
-    table["sap_von_num"] = pd.to_numeric(table["sap_von"], errors="coerce")
-    table["sap_bis_num"] = pd.to_numeric(table["sap_bis"], errors="coerce")
-    table = table.dropna(subset=["sap_von_num", "sap_bis_num"]).reset_index(drop=True)
-
-    result = df_plan.copy()
-
-    if table.empty:
-        result["Tourengruppe"] = ""
-        result["Kostenstelle"] = ""
-        result["Leiter"] = ""
-        return result
-
-    # CSB Tournummern als numerische Werte
-    csb_nums = pd.to_numeric(
-        result["CSB Tournummer"].map(normalize_digits), errors="coerce"
-    ).values
-
-    # Vectorisierter Lookup: Kostenstellen-Tabelle ist klein (~50 Zeilen),
-    # daher Loop über Tabelle mit numpy-vectorisierten Vergleichen über alle plan_rows.
-    # Erster Treffer gewinnt (wie im Original).
-    n = len(result)
-    match_idx = np.full(n, -1, dtype=int)
-
-    vons = table["sap_von_num"].values
-    biss = table["sap_bis_num"].values
-
-    for i in range(len(table)):
-        # Nur Zeilen matchen die noch keinen Treffer haben
-        unmatched = match_idx == -1
-        in_range = (csb_nums >= vons[i]) & (csb_nums <= biss[i]) & unmatched
-        match_idx[in_range] = i
-
-    # Ergebnis-Spalten aus Lookup-Index ableiten
-    matched = match_idx >= 0
-    result["Tourengruppe"] = ""
-    result["Kostenstelle"] = ""
-    result["Leiter"] = ""
-
-    if matched.any():
-        valid_idx = match_idx[matched]
-        result.loc[matched, "Tourengruppe"] = table["tourengruppe"].iloc[valid_idx].map(normalize_text).values
-        result.loc[matched, "Kostenstelle"] = table["kostenstelle"].iloc[valid_idx].map(normalize_text).values
-        result.loc[matched, "Leiter"] = table["leiter"].iloc[valid_idx].map(normalize_text).values
-
-    return result
 
 
 def prepare_dataframes(
@@ -589,7 +423,6 @@ def prepare_dataframes(
     df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
     df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
     df_transport = load_structured_upload(transport_bytes, transport_name, csv_separator, "transport")
-    df_kostenstellen = load_kostenstellen_upload(kostenstellen_bytes, kostenstellen_name, csv_separator)
 
     # normalize_text wurde bereits in cleanup_dataframe() angewendet – kein zweiter Pass nötig.
 
@@ -608,7 +441,7 @@ def prepare_dataframes(
         how="left",
     )
 
-    # Basis-Merge: Kundenstamm-Spalten an plan_rows anhängen (ohne Kategorie – wird unten einmal gesetzt)
+    # Basis-Merge: Kundenstamm-Spalten an plan_rows anhängen
     plan_rows = df_sap.merge(
         kunden_basis[["SAP_Nr", "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater"]],
         on="SAP_Nr",
@@ -627,10 +460,10 @@ def prepare_dataframes(
     plan_rows["CSB Tournummer"] = ""
     plan_rows["Verladetor"] = ""
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
-    # Sortiment-Priorität: Fleisch/Heidemark zuerst, CSB-Kram zuletzt
+    # Sortiment-Priorität: Fleisch/Heidemark zuerst, Zusatz-Kram zuletzt
     def _sortiment_key(name: str) -> tuple:
         n = str(name).strip().lower()
-        # CSB-Kram (AVO, Werbemittel, Hamburger Jungs) ans Ende
+        # Zusatz-Kram (AVO, Werbemittel, Hamburger Jungs, Lagerware) ans Ende
         if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
             return (9, name)
         # Prioritäts-Sortimente ganz vorne
@@ -641,38 +474,12 @@ def prepare_dataframes(
         return (5, name)
     plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("").map(_sortiment_key)
 
-    # Kostenstellen-Lookup auf plan_rows (CSB-Tournummer ist jetzt verfuegbar)
-    plan_rows = apply_kostenstellen_lookup(plan_rows, df_kostenstellen)
-
-    # Kategorie aus erster CSB Tournummer pro Kunde bestimmen (einmaliger Schritt)
-    csb_tour_agg = (
-        plan_rows[plan_rows["CSB Tournummer"] != ""]
-        .drop_duplicates(subset=["SAP_Nr"])
-        [["SAP_Nr", "CSB Tournummer"]]
-    )
-    csb_tour_agg["Kategorie"] = csb_tour_agg["CSB Tournummer"].map(classify_by_csb_tour)
-    _kat_map = csb_tour_agg.set_index("SAP_Nr")["Kategorie"]
-    # Kategorie auf kunden_basis und plan_rows in einem Schritt (kein Re-Merge nötig)
-    kunden_basis["Kategorie"] = kunden_basis["SAP_Nr"].map(_kat_map).fillna("Direkt")
-    plan_rows["Kategorie"] = plan_rows["SAP_Nr"].map(_kat_map).fillna("Direkt")
-
-    # Tourengruppe / Kostenstelle / Leiter zurueck auf kunden_basis aggregieren
-    # (erster nicht-leerer Wert pro SAP_Nr, damit die Kundenkarte diese Felder zeigt)
-    kst_agg = (
-        plan_rows[plan_rows["Tourengruppe"] != ""]
-        .drop_duplicates(subset=["SAP_Nr"])
-        [["SAP_Nr", "Tourengruppe", "Kostenstelle", "Leiter"]]
-    )
-    kunden_basis = kunden_basis.merge(kst_agg, on="SAP_Nr", how="left")
-    for col in ["Tourengruppe", "Kostenstelle", "Leiter"]:
-        kunden_basis[col] = kunden_basis[col].fillna("")
-
     # Zusatz-Sortimente (AVO, Werbemittel etc.) aus Kostenstellenplan generieren
+    # Join über KSP_Schluessel (SAP Spalte P) + Liefertag
     zusatz_schedule = extract_zusatz_schedule(kostenstellen_bytes, kostenstellen_name)
     plan_rows = build_zusatz_plan_rows(plan_rows, zusatz_schedule)
 
-    counts = {cat: int((kunden_basis["Kategorie"] == cat).sum()) for cat in KATEGORIEN if cat != "Alle"}
-    counts["Alle"] = int(len(kunden_basis))
+    counts = {"Alle": int(len(kunden_basis))}
 
     # Vorberechnete Suchspalte für schnelle filter_customers-Aufrufe
     kunden_basis["_search_blob"] = (
@@ -700,19 +507,18 @@ def build_debug_report(
         """Nur Spalten auswählen die wirklich vorhanden sind."""
         return df[[c for c in cols if c in df.columns]]
 
-    # Direkt-Kunden (alle ohne CSB-Tour sind jetzt Direkt)
-    csb_col = "CSB Tournummer"
-    if csb_col in plan_rows.columns and "Kategorie" in plan_rows.columns:
-        unklar_mask = (
-            (plan_rows["Kategorie"] == "Direkt") &
-            (plan_rows[csb_col].map(normalize_text) == "")
-        )
-        reports["Direkt ohne CSB-Tour"] = safe_cols(
-            plan_rows[unklar_mask],
-            ["SAP_Nr", "Name", "Rahmentour_Raw", "Sortiment"]
-        ).drop_duplicates().reset_index(drop=True)
+    # Kunden ohne Zusatz-Sortimente
+    if "_ist_zusatz" in plan_rows.columns:
+        sap_with_zusatz = set(plan_rows.loc[plan_rows["_ist_zusatz"] == True, "SAP_Nr"].unique())
+        sap_all = set(plan_rows["SAP_Nr"].unique())
+        sap_without = sap_all - sap_with_zusatz
+        ohne_zusatz = plan_rows[plan_rows["SAP_Nr"].isin(sap_without)]
+        reports["Ohne Zusatz-Sortimente"] = safe_cols(
+            ohne_zusatz,
+            ["SAP_Nr", "Name", "KSP_Schluessel", "Liefertag", "Sortiment"]
+        ).drop_duplicates(subset=["SAP_Nr"]).reset_index(drop=True)
     else:
-        reports["Direkt ohne CSB-Tour"] = pd.DataFrame()
+        reports["Ohne Zusatz-Sortimente"] = pd.DataFrame()
 
     return reports
 
@@ -770,15 +576,11 @@ def render_debug_tab(reports: Dict[str, pd.DataFrame]) -> None:
 # ============================================================
 # FILTER
 # ============================================================
-def filter_customers(df_customers: pd.DataFrame, category: str, search_text: str) -> pd.DataFrame:
+def filter_customers(df_customers: pd.DataFrame, search_text: str) -> pd.DataFrame:
     mask = pd.Series(True, index=df_customers.index)
-
-    if category != "Alle":
-        mask &= df_customers["Kategorie"] == category
 
     search = normalize_text(search_text).lower()
     if search:
-        # Nutze vorberechnete _search_blob Spalte wenn vorhanden, sonst Fallback
         if "_search_blob" in df_customers.columns:
             mask &= df_customers["_search_blob"].str.contains(search, na=False)
         else:
@@ -1525,13 +1327,8 @@ def render_customer_plan(
     plz         = str(customer.get("PLZ", ""))
     ort         = str(customer.get("Ort", ""))
     fachberater = str(customer.get("Fachberater", ""))
-    tourengruppe = str(customer.get("Tourengruppe", ""))
-    kostenstelle = str(customer.get("Kostenstelle", ""))
-    leiter       = str(customer.get("Leiter", ""))
     stand = datetime.now().strftime("%d.%m.%Y")
 
-    # Tourengruppe -> Subtitle (Standard / NMS / Malchow / MK …)
-    kategorie = str(customer.get("Kategorie", ""))
     subtitle = "Standard"  # Immer Standard – per contenteditable änderbar
 
     tour_overview_html = render_tour_overview(customer_rows)
@@ -1599,7 +1396,6 @@ def render_separator_page(customer: pd.Series) -> str:
         <h2>SAP {html.escape(str(customer.get('SAP_Nr', '')))}</h2>
         <p>CSB {html.escape(str(customer.get('CSB_Nr', '')))}</p>
         <p>{html.escape(str(customer.get('PLZ', '')))} {html.escape(str(customer.get('Ort', '')))}</p>
-        <p>Kategorie: {html.escape(str(customer.get('Kategorie', '')))}</p>
     </div>
     """
 
@@ -1642,28 +1438,8 @@ def render_export_search_toolbar(massendruck_section: str = "", logo_b64: str = 
         </div>
 
         <div class="sidebar-section">
-            <div class="sidebar-label">Kategorie</div>
-            <button type="button" class="filter-btn active" data-kat="alle">
-                Alle <span class="filter-count" id="cnt-alle"></span>
-            </button>
-            <button type="button" class="filter-btn" data-kat="MK">
-                MK <span class="filter-count" id="cnt-mk"></span>
-            </button>
-            <button type="button" class="filter-btn" data-kat="Malchow">
-                Malchow <span class="filter-count" id="cnt-malchow"></span>
-            </button>
-            <button type="button" class="filter-btn" data-kat="NMS">
-                NMS <span class="filter-count" id="cnt-nms"></span>
-            </button>
-            <button type="button" class="filter-btn" data-kat="SuL">
-                SuL <span class="filter-count" id="cnt-sul"></span>
-            </button>
-            <button type="button" class="filter-btn" data-kat="Direkt">
-                Direkt <span class="filter-count" id="cnt-direkt"></span>
-            </button>
-            <button type="button" class="filter-btn filter-btn-warn" data-kat="ohne-csb">
-                Ohne CSB-Tour <span class="filter-count" id="cnt-ohne-csb"></span>
-            </button>
+            <div class="sidebar-label">Kunden</div>
+            <span class="search-count" id="cnt-alle" style="font-size:12px;color:#4a5568"></span>
         </div>
 
         <div class="sidebar-subtitle-group">
@@ -1802,7 +1578,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     &#128269; Reihenfolge ansehen
                 </button>
                 <button type="button" class="sidebar-print-btn md-print-btn"
-                    onclick="printMassendruck()">&#128438; Drucken (aktive Kategorie)</button>
+                    onclick="printMassendruck()">&#128438; Drucken</button>
             </div>
         </div>
 
@@ -1820,7 +1596,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                             <th style="width:36px">#</th>
                             <th>Kundenname</th>
                             <th style="width:54px">SAP-Nr</th>
-                            <th style="width:70px">Kategorie</th>
                             <th id="md-th-p" style="width:72px">Prim\u00e4r</th>
                             <th id="md-th-s" style="width:72px">Sekund\u00e4r</th>
                             <th style="width:70px">Priorit\u00e4t</th>
@@ -1830,7 +1605,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 </div>
                 <div class="md-overlay-footer">
                     <button type="button" class="sidebar-print-btn" style="width:auto;padding:10px 28px"
-                        onclick="printMassendruck()">&#128438; Drucken (aktive Kategorie)</button>
+                        onclick="printMassendruck()">&#128438; Drucken</button>
                     <button type="button" class="md-overview-btn" onclick="closeMdOverlay()">Schlie\u00dfen</button>
                 </div>
             </div>
@@ -1969,17 +1744,11 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
             }
 
-            function getActiveKat() {
-                var btn = document.querySelector('.filter-btn.active');
-                return btn ? (btn.getAttribute('data-kat') || 'alle') : 'alle';
-            }
-
             function computeOrder(primaryDay) {
                 var entries = window._allEntries || Array.from(document.querySelectorAll('.customer-entry'));
                 var ordered = entries.map(function(entry) {
                     var sap    = (entry.getAttribute('data-sap') || '').trim();
                     var name   = entry.getAttribute('data-name') || '';
-                    var kat    = entry.getAttribute('data-kategorie') || '';
                     var asgn   = MD.assignments[sap] || {};
                     var pt     = asgn[String(primaryDay)] || '';
 
@@ -2000,7 +1769,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     var tourDigits = (pt || st || '').replace(/\\D/g,'').padStart(8,'0');
                     return {
                         entry: entry, pt: pt, st: st, stDay: stDay,
-                        prio: prio, name: name, kat: kat,
+                        prio: prio, name: name,
                         sap: entry.getAttribute('data-sap') || '',
                         key: prio + tourDigits + name
                     };
@@ -2009,21 +1778,11 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 return ordered;
             }
 
-            // Filtert ordered nach aktiver Kategorie
-            function filterByKat(ordered) {
-                var activeKat = getActiveKat();
-                return ordered.filter(function(o) {
-                    var ohnecsb = o.entry.getAttribute('data-ohne-csb') === '1';
-                    return activeKat === 'alle' || o.kat === activeKat ||
-                           (activeKat === 'ohne-csb' && ohnecsb);
-                });
-            }
-
-            // Erstellt Statistik-HTML für die Sidebar (nur gefilterte Kunden)
-            function buildStatsHtml(filtered, pdName) {
+            // Erstellt Statistik-HTML für die Sidebar
+            function buildStatsHtml(ordered, pdName) {
                 var pCount = 0, uCount = 0;
                 var sByDay = {};   // { dayNum: { name, count } }
-                filtered.forEach(function(o) {
+                ordered.forEach(function(o) {
                     if (o.prio === 0) { pCount++; }
                     else if (o.prio === 1) {
                         var d = String(o.stDay);
@@ -2032,11 +1791,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     } else { uCount++; }
                 });
                 var html = '<span style="color:#1a7f3c">&#9679; Prim\u00e4r (' + escHtml(pdName) + '): <strong>' + pCount + '</strong></span><br>';
-                // Sekundärtage aufsteigend sortiert ausgeben
                 var sDays = Object.keys(sByDay).sort(function(a,b){ return parseInt(a)-parseInt(b); });
                 sDays.forEach(function(d) {
                     var sName = sByDay[d].name;
-                    // Wochentag relativ zum Primärtag einrücken: nahe = blau, weit = grau
                     html += '<span style="color:#1a60b0">&nbsp;&nbsp;&#8627; Sekund\u00e4r ' + escHtml(sName) + ': <strong>' + sByDay[d].count + '</strong></span><br>';
                 });
                 html += '<span style="color:#9a9a9a">&#9679; Keine Tour: <strong>' + uCount + '</strong></span>';
@@ -2049,10 +1806,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (thP) thP.textContent = pdName.slice(0,2) + '-Tour (Prim\u00e4r)';
                 if (thS) thS.textContent = 'Sekund\u00e4r-Tour (Tag)';
 
-                var filtered = filterByKat(ordered);
                 var tbody = document.getElementById('md-table-body');
                 tbody.innerHTML = '';
-                filtered.forEach(function(o, i) {
+                ordered.forEach(function(o, i) {
                     var prioLabel = o.prio === 0
                         ? '<span class="md-prio-p">Prim\u00e4r</span>'
                         : o.prio === 1
@@ -2064,13 +1820,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                         '<td style="color:#6b7a90;text-align:right;padding-right:8px">' + (i+1) + '</td>' +
                         '<td style="font-weight:600;color:#1a2332">' + escHtml(o.name) + '</td>' +
                         '<td style="font-family:monospace;font-size:11px;color:#6b7a90">' + escHtml(o.sap) + '</td>' +
-                        '<td style="font-size:11px;color:#4a5568">' + escHtml(o.kat) + '</td>' +
                         '<td class="md-tour" style="color:#b07800">' + escHtml(o.pt) + '</td>' +
                         '<td class="md-tour">' + stCell + '</td>' +
                         '<td>' + prioLabel + '</td>';
                     tbody.appendChild(tr);
                 });
-                return filtered.length;
+                return ordered.length;
             }
 
             function applyMassendruck(primaryDay) {
@@ -2093,15 +1848,10 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     span.textContent = tour ? 'Tour: ' + tour : '';
                 });
 
-                // Statistik NUR für aktive Kategorie
-                var filtered = filterByKat(lastOrdered);
-                var activeKat = getActiveKat();
-                var katLabel  = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
-
                 var stats = document.getElementById('md-stats');
                 stats.style.display = '';
-                stats.innerHTML = buildStatsHtml(filtered, pdName) +
-                    '<br><span style="color:#9a6800;font-size:9px">Druck: ' + escHtml(katLabel) + ' (' + filtered.length + ' Kunden)</span>';
+                stats.innerHTML = buildStatsHtml(lastOrdered, pdName) +
+                    '<br><span style="color:#9a6800;font-size:9px">' + lastOrdered.length + ' Kunden</span>';
 
                 var row = document.getElementById('md-btn-row');
                 if (row) row.style.display = '';
@@ -2116,18 +1866,15 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 if (activeMdDay === null) return;
                 var primaryDay = activeMdDay;
                 var pdName   = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
-                var activeKat = getActiveKat();
-                var katLabel  = activeKat === 'alle' ? 'alle Kategorien' : activeKat;
 
                 var title = document.getElementById('md-overlay-title');
                 if (title) title.textContent = 'Druckreihenfolge \u2013 Prim\u00e4rtag: ' + pdName;
 
                 var nr = buildTable(lastOrdered, pdName);
 
-                var filtered = filterByKat(lastOrdered);
                 var ostats = document.getElementById('md-overlay-stats');
-                if (ostats) ostats.innerHTML = buildStatsHtml(filtered, pdName) +
-                    '&nbsp;&nbsp;<span style="color:#9a6800">Gedruckt wird: <strong>' + escHtml(katLabel) + '</strong> (' + nr + ' Kunden)</span>';
+                if (ostats) ostats.innerHTML = buildStatsHtml(lastOrdered, pdName) +
+                    '&nbsp;&nbsp;<span style="color:#9a6800">' + nr + ' Kunden</span>';
 
                 var overlay = document.getElementById('md-overlay');
                 if (overlay) overlay.style.display = 'flex';
@@ -2140,8 +1887,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
             window.printMassendruck = function() {
                 closeMdOverlay();
-                // Nur die aktuell sichtbare Kategorie drucken (activeKat-Filter bleibt)
-                // DOM ist bereits in Massendruck-Reihenfolge – window.print() druckt was sichtbar ist
                 window.print();
             };
 
@@ -2192,8 +1937,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 customer.get("PLZ", ""),
                 customer.get("Strasse", ""),
                 customer.get("Fachberater", ""),
-                customer.get("Tourengruppe", ""),
-                customer.get("Kategorie", ""),
                 sortimente_text,
             ]
             if part
@@ -2212,9 +1955,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             f'data-idx="{entry_count}" '
             f'data-sap="{html.escape(sap.lower())}" '
             f'data-csb="{html.escape(csb_search)}" '
-            f'data-name="{cust_name_escaped}" '
-            f'data-kategorie="{html.escape(str(customer.get("Kategorie", "")))}" '
-            f'data-ohne-csb="{1 if not csb_touren else 0}">'
+            f'data-name="{cust_name_escaped}">'
             f'{"".join(entry_parts)}'
             f'</section>'
         )
@@ -2234,7 +1975,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         var allEntries = [];
         var matches    = [];
         var cursor     = -1;
-        var activeKat  = "alle";
 
         function norm(s) {
             return (s || "").toLowerCase()
@@ -2270,24 +2010,14 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         function updateCounts() {
             var q = norm(document.getElementById("search-input").value);
             var SD = window._searchData || [];
-            var counts = { alle: 0, MK: 0, Malchow: 0, NMS: 0, SuL: 0, Direkt: 0, "ohne-csb": 0 };
+            var total = 0;
             allEntries.forEach(function (e) {
-                var kat = e.getAttribute("data-kategorie") || "";
                 var idx = parseInt(e.getAttribute("data-idx"), 10);
                 var blob = norm(SD[idx] || "");
-                var ohnecsb = e.getAttribute("data-ohne-csb") === "1";
-                var matchesSearch = !q || blob.indexOf(q) !== -1;
-                if (matchesSearch) {
-                    counts.alle++;
-                    if (counts[kat] !== undefined) counts[kat]++;
-                    if (ohnecsb) counts["ohne-csb"]++;
-                }
+                if (!q || blob.indexOf(q) !== -1) total++;
             });
-            var map = { alle: "cnt-alle", MK: "cnt-mk", Malchow: "cnt-malchow", NMS: "cnt-nms", SuL: "cnt-sul", Direkt: "cnt-direkt", "ohne-csb": "cnt-ohne-csb" };
-            Object.keys(map).forEach(function (k) {
-                var el = document.getElementById(map[k]);
-                if (el) el.textContent = counts[k] !== undefined ? counts[k] : "";
-            });
+            var el = document.getElementById("cnt-alle");
+            if (el) el.textContent = total + " Kunden";
         }
 
         function updateSearchCount() {
@@ -2309,9 +2039,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             }
         }
 
-        var _searchJumped = false;  // true wenn Auto-Jump die Kategorie gesetzt hat
-        var _fromSearch = false;    // true wenn applyFilter von Sucheingabe getriggert wird
-
         function applyFilter() {
             var q = norm(document.getElementById("search-input").value);
             var SD = window._searchData || [];
@@ -2319,45 +2046,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             matches = [];
             cursor  = -1;
 
-            // Auto-Jump: nur wenn von Sucheingabe getriggert
-            if (_fromSearch) {
-                if (q) {
-                    var firstMatch = null;
-                    for (var i = 0; i < allEntries.length; i++) {
-                        var idx = parseInt(allEntries[i].getAttribute("data-idx"), 10);
-                        var blob = norm(SD[idx] || "");
-                        if (blob.indexOf(q) !== -1) { firstMatch = allEntries[i]; break; }
-                    }
-                    if (firstMatch) {
-                        var kat = firstMatch.getAttribute("data-kategorie") || "";
-                        if (kat && kat !== activeKat) {
-                            activeKat = kat;
-                            _searchJumped = true;
-                            document.querySelectorAll(".filter-btn").forEach(function (b) {
-                                b.classList.toggle("active", b.getAttribute("data-kat") === kat);
-                            });
-                        }
-                    }
-                } else if (_searchJumped) {
-                    activeKat = "alle";
-                    _searchJumped = false;
-                    document.querySelectorAll(".filter-btn").forEach(function (b) {
-                        b.classList.toggle("active", b.getAttribute("data-kat") === "alle");
-                    });
-                }
-                _fromSearch = false;
-            }
-
             allEntries.forEach(function (entry) {
-                var kat  = entry.getAttribute("data-kategorie") || "";
                 var idx  = parseInt(entry.getAttribute("data-idx"), 10);
                 var blob = norm(SD[idx] || "");
-                var ohnecsb = entry.getAttribute("data-ohne-csb") === "1";
-                var katOk  = activeKat === "alle" || kat === activeKat || (activeKat === "ohne-csb" && ohnecsb);
                 var srchOk = !q || blob.indexOf(q) !== -1;
-                var show   = katOk && srchOk;
-                entry.style.display = show ? "" : "none";
-                if (show && q) {
+                entry.style.display = srchOk ? "" : "none";
+                if (srchOk && q) {
                     setClass(entry, "is-match", true);
                     matches.push(entry);
                 }
@@ -2384,10 +2078,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         function resetSearch() {
             clearHighlights();
             document.getElementById("search-input").value = "";
-            activeKat = "alle";
-            document.querySelectorAll(".filter-btn").forEach(function (b) {
-                b.classList.toggle("active", b.getAttribute("data-kat") === "alle");
-            });
             allEntries.forEach(function (e) { e.style.display = ""; });
             matches = [];
             cursor  = -1;
@@ -2403,7 +2093,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             var _searchTimer = null;
             document.getElementById("search-input").addEventListener("input", function () {
                 clearTimeout(_searchTimer);
-                _searchTimer = setTimeout(function () { _fromSearch = true; applyFilter(); }, 150);
+                _searchTimer = setTimeout(function () { applyFilter(); }, 150);
             });
             document.getElementById("btn-next").addEventListener("click",  function () { step(1); });
             document.getElementById("btn-prev").addEventListener("click",  function () { step(-1); });
@@ -2412,18 +2102,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             document.getElementById("search-input").addEventListener("keydown", function (e) {
                 if (e.key === "Enter")  { e.preventDefault(); step(e.shiftKey ? -1 : 1); }
                 if (e.key === "Escape") { resetSearch(); }
-            });
-
-            // Kategorie-Filter Buttons
-            document.querySelectorAll(".filter-btn").forEach(function (btn) {
-                btn.addEventListener("click", function () {
-                    activeKat = btn.getAttribute("data-kat");
-                    _searchJumped = false;  // manueller Klick überschreibt Auto-Jump
-                    document.querySelectorAll(".filter-btn").forEach(function (b) {
-                        b.classList.toggle("active", b === btn);
-                    });
-                    applyFilter();
-                });
             });
 
             // Globaler Untertitel
@@ -2688,8 +2366,6 @@ def build_option_labels(df_customers: pd.DataFrame) -> Dict[str, str]:
 
 
 def init_session_state() -> None:
-    if "category_filter" not in st.session_state:
-        st.session_state.category_filter = "Alle"
     if "selected_sap" not in st.session_state:
         st.session_state.selected_sap = ""
     if "search_text" not in st.session_state:
@@ -2700,7 +2376,7 @@ def init_session_state() -> None:
 
 
 def set_category(category: str) -> None:
-    st.session_state.category_filter = category
+    pass  # Kategorien entfernt
 
 
 def all_required_uploads_present(upload_map: Dict[str, Optional[object]]) -> bool:
@@ -2754,9 +2430,9 @@ def show_onboarding(upload_map: Dict[str, Optional[object]]) -> None:
             """
             <ul style="margin:0; padding-left:1.1rem; line-height:1.7;">
                 <li>Kundenliste: A, I, J, K, L, M, N</li>
-                <li>SAP-Datei: A, H, I, O, Y</li>
+                <li>SAP-Datei: A, G, H, I, O, P, Y</li>
                 <li>Transportgruppen: A, C</li>
-                <li>Kostenstellen: A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter</li>
+                <li>Kostenstellen: Sheet &laquo;CSB Standard&raquo; f&uuml;r Zusatz-Sortimente</li>
             </ul>
             """,
         )
@@ -2766,18 +2442,8 @@ def show_onboarding(upload_map: Dict[str, Optional[object]]) -> None:
 
 
 def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> None:
-    left, right = st.columns([4, 1.6], gap="large")
-
-    with left:
-        st.markdown(f"### {customer['Name']}")
-        st.caption(f"SAP {customer['SAP_Nr']} · CSB {customer['CSB_Nr']} · {customer['PLZ']} {customer['Ort']}")
-
-    with right:
-        st.markdown("#### Eckdaten")
-        st.write(f"**Kategorie:** {normalize_text(customer.get('Kategorie', '')) or '-'}")
-        st.write(f"**Tourengruppe:** {normalize_text(customer.get('Tourengruppe', '')) or '-'}")
-        st.write(f"**Kostenstelle:** {normalize_text(customer.get('Kostenstelle', '')) or '-'}")
-        st.write(f"**Leiter:** {normalize_text(customer.get('Leiter', '')) or '-'}")
+    st.markdown(f"### {customer['Name']}")
+    st.caption(f"SAP {customer['SAP_Nr']} · CSB {customer['CSB_Nr']} · {customer['PLZ']} {customer['Ort']}")
 
     info_cols = st.columns(4)
     info_cols[0].metric("SAP-Nummer", normalize_text(customer.get("SAP_Nr", "")) or "-")
@@ -2863,12 +2529,12 @@ def main() -> None:
         kunden_file = st.file_uploader("Kundenliste", type=["xlsx", "xls", "xlsm", "csv"],
                                         help="Spalten: A, I, J, K, L, M, N")
         sap_file = st.file_uploader("SAP-Datei", type=["xlsx", "xls", "xlsm", "csv"],
-                                     help="Spalten: A, G, H, I, O, Y")
+                                     help="Spalten: A, G, H, I, O, P, Y")
     with col_right:
         transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
                                           help="Spalten: A, C")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
-                                              help="A=Tourengruppe, B=SAP-Bereich, C=Kostenstelle, D=Leiter")
+                                              help="Sheet 'CSB Standard' wird für Zusatz-Sortimente genutzt")
     logo_file = st.file_uploader(
         "Druck-Logo (Sendeplan)",
         type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
@@ -2963,9 +2629,8 @@ def main() -> None:
 
     # ── Tab: Export ──
     with tab_plan:
-        cat_parts = [f"{k}: {v}" for k, v in counts.items() if k != "Alle"]
         st.markdown(
-            f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen · {' · '.join(cat_parts)}"
+            f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen"
         )
 
         include_sep = st.checkbox(
@@ -3009,20 +2674,13 @@ def main() -> None:
     with tab_preview:
         st.markdown("Wähle einen Kunden zur schnellen Voransicht – ohne vollen HTML-Export.")
 
-        # Kategorie-Filter
-        kat_filter = st.selectbox(
-            "Kategorie filtern",
-            options=KATEGORIEN,
-            index=0,
-            key="preview_kat",
-        )
         search_input = st.text_input(
             "Suche (Name, SAP, CSB, Ort)",
             key="preview_search",
             placeholder="z.B. Edeka Muster oder 1234567",
         )
 
-        filtered = filter_customers(customers_df, kat_filter, search_input)
+        filtered = filter_customers(customers_df, search_input)
 
         if filtered.empty:
             st.warning("Keine Kunden gefunden.")
