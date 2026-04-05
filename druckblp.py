@@ -123,6 +123,15 @@ def normalize_digits(value) -> str:
     return digits if digits else text
 
 
+def _normalize_ksp_key(value) -> str:
+    """Normalisiert KSP-Schlüssel: 1.0 -> '1', '1.0' -> '1', 1 -> '1'."""
+    text = normalize_text(value)
+    # Float-artige Strings: '1.0' -> '1'
+    if re.match(r'^\d+\.0$', text):
+        text = text[:-2]
+    return text
+
+
 def day_name_from_number(value) -> str:
     try:
         return WOCHENTAGE.get(int(str(value).strip()), "Unbekannt")
@@ -322,7 +331,7 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
         b = row[1] if len(row) > 1 else None
         if b is None:
             continue
-        ksp_key = normalize_text(b)
+        ksp_key = _normalize_ksp_key(b)
         if not ksp_key:
             continue
 
@@ -383,11 +392,11 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
         .copy()
     )
 
-    # Normalize für Merge
+    # Normalize für Merge – _normalize_ksp_key entfernt z.B. ".0" bei float-Werten
     sched = zusatz_schedule.copy()
-    sched["_ksp_norm"] = sched["ksp_schluessel"].str.strip().str.lower()
+    sched["_ksp_norm"] = sched["ksp_schluessel"].map(_normalize_ksp_key).str.lower()
     sched["_lt_norm"]  = sched["liefertag"].str.strip().str.lower()
-    basis["_ksp_norm"] = basis["KSP_Schluessel"].str.strip().str.lower()
+    basis["_ksp_norm"] = basis["KSP_Schluessel"].map(_normalize_ksp_key).str.lower()
     basis["_lt_norm"]  = basis["Liefertag"].str.strip().str.lower()
 
     # Leere KSP-Schlüssel / Liefertage ausfiltern
