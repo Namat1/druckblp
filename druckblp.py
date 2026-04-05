@@ -42,12 +42,12 @@ SORTIMENT_PRIO = {
     "fleisch- & wurst sb":        1,
     "heidemark":                  2,
 }
-SORTIMENT_ZUSATZ_KEYWORDS = ("avo", "werbemittel", "hamburger jungs", "lagerware")
+SORTIMENT_ZUSATZ_KEYWORDS = ("avo", "werbemittel", "hamburger jungs", "lagerware", "divers")
 
-# Zusatz-Sortimente aus KSP "CSB Standard" Sheet.
-# Spalte A = Liefertag (1=Mo..6=Sa), B = KSP-Schlüssel.
+# Zusatz-Sortimente aus KSP Sheet.
+# Spalte A(0) = Liefertag (1=Mo..6=Sa), B(1) = Tourname (Join-Key zu SAP.P).
 # Danach je 3 Spalten pro Sortiment: Name | Uhrzeit | Bestelltag
-# C/D/E = Lagerware, F/G/H = AVO, I/J/K = WM Sonder, L/M/N = WM, O/P/Q = HJ
+# C/D/E = Lagerware, F/G/H = AVO, I/J/K = WM Sonder, L/M/N = WM, O/P/Q = HJ, R/S/T = Divers
 # Nur hinzufügen wenn Uhrzeit UND Tag vorhanden.
 KST_ZUSATZ_GRUPPEN = [
     (2,  "Lagerware"),
@@ -55,6 +55,7 @@ KST_ZUSATZ_GRUPPEN = [
     (8,  "Werbemittel Sonder"),
     (11, "Werbemittel"),
     (14, "Hamburger Jungs"),
+    (17, "Divers"),
 ]
 
 TAG_ABKUERZUNGEN = {
@@ -105,7 +106,7 @@ UPLOAD_CONFIG = {
     },
 }
 
-# (Kostenstellenplan wird nur noch für Zusatz-Sortimente via CSB Standard Sheet genutzt.)
+# (Kostenstellenplan wird nur noch für Zusatz-Sortimente genutzt – erstes Sheet.)
 
 
 # ============================================================
@@ -292,7 +293,7 @@ def _parse_kst_tag(val) -> str:
 
 def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
     """Extrahiert den Bestellplan fuer Zusatz-Sortimente (AVO, Werbemittel, …)
-    aus dem Kostenstellenplan CSB Standard.
+    aus dem Kostenstellenplan (erstes Sheet).
 
     Flaches Layout – jede Zeile ist eine Tour:
       A = Liefertag (1=Mo … 6=Sa)
@@ -306,10 +307,8 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
     Ergebnis-DataFrame: ksp_schluessel | liefertag | sortiment | bestelltag | bestellzeitende
     """
     wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
-    if "CSB Standard" not in wb.sheetnames:
-        return pd.DataFrame(columns=["ksp_schluessel","liefertag","sortiment","bestelltag","bestellzeitende"])
-
-    ws = wb["CSB Standard"]
+    # Erstes Sheet verwenden (heißt je nach Datei "Tabelle1", "CSB Standard" o.ä.)
+    ws = wb[wb.sheetnames[0]]
     all_rows = list(ws.iter_rows(values_only=True))
     records = []
 
@@ -2457,7 +2456,7 @@ def show_onboarding(upload_map: Dict[str, Optional[object]]) -> None:
                 <li>Kundenliste: A, I, J, K, L, M, N</li>
                 <li>SAP-Datei: A, G, H, I, O, P, Y</li>
                 <li>Transportgruppen: A, C</li>
-                <li>Kostenstellen: Sheet &laquo;CSB Standard&raquo; f&uuml;r Zusatz-Sortimente</li>
+                <li>Kostenstellen: Erstes Sheet, A=Liefertag, B=Tourname, dann Sortiment-Gruppen</li>
             </ul>
             """,
         )
@@ -2559,7 +2558,7 @@ def main() -> None:
         transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
                                           help="Spalten: A, C")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
-                                              help="Sheet 'CSB Standard' wird für Zusatz-Sortimente genutzt")
+                                              help="A=Liefertag, B=Tourname, dann Sortiment-Gruppen (Lagerware, AVO, …)")
     logo_file = st.file_uploader(
         "Druck-Logo (Sendeplan)",
         type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
