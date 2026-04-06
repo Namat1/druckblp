@@ -414,7 +414,7 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
     merged["Sortiment"] = merged["sortiment"]
     merged["Bestelltag_Name"] = merged["bestelltag"]
     merged["Bestellzeitende"] = merged["bestellzeitende"]
-    merged["SortKey_Sortiment"] = merged["sortiment"].map(lambda n: (1, 0, n))
+    merged["SortKey_Sortiment"] = merged["sortiment"].map(lambda n: (1, 0))
     merged["_ist_zusatz"] = True
 
     # Aufräumen: nur plan_rows-Spalten behalten, Rest auffüllen
@@ -494,12 +494,12 @@ def prepare_dataframes(
         # SAP-Sortimente (Fleisch, Heidemark etc.) zuerst
         for key, prio in SORTIMENT_PRIO.items():
             if key in n:
-                return (0, prio, name)
+                return (0, prio)
         # CSB/Zusatz (Lagerware, AVO, Werbemittel, Hamburger Jungs, Divers) danach
         if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
-            return (1, 0, name)
-        # Alles andere dazwischen (alphabetisch)
-        return (0, 5, name)
+            return (1, 0)
+        # Alles andere dazwischen
+        return (0, 5)
     plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("").map(_sortiment_key)
 
     # Zusatz-Sortimente (AVO, Werbemittel etc.) aus Kostenstellenplan generieren
