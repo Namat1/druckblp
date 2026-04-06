@@ -2002,6 +2002,14 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             var h = '';
             sorted.forEach(function(day) {
                 var rows = days[day];
+                rows.sort(function(a,b) {
+                    var sa = a.src === 'SAP' ? 0 : 1;
+                    var sb = b.src === 'SAP' ? 0 : 1;
+                    if (sa !== sb) return sa - sb;
+                    if (a.bzeit < b.bzeit) return -1;
+                    if (a.bzeit > b.bzeit) return 1;
+                    return 0;
+                });
                 h += '<div style="margin:18px 0 8px;font-size:13px;font-weight:800;color:#1a2332;border-bottom:2px solid #e5e9f0;padding-bottom:5px">';
                 h += esc(day) + '</div>';
                 h += '<table class="src-table"><thead><tr>';
