@@ -491,15 +491,15 @@ def prepare_dataframes(
     # Sortiment-Priorität: Fleisch/Heidemark zuerst, Zusatz-Kram zuletzt
     def _sortiment_key(name: str) -> tuple:
         n = str(name).strip().lower()
-        # SAP-Sortimente (Fleisch, Heidemark etc.) zuerst
+        # Fleisch/Heidemark IMMER ganz oben (Gruppe -1)
         for key, prio in SORTIMENT_PRIO.items():
             if key in n:
-                return (0, prio)
-        # CSB/Zusatz (Lagerware, AVO, Werbemittel, Hamburger Jungs, Divers) danach
+                return (-1, prio)
+        # CSB/Zusatz danach
         if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
             return (1, 0)
         # Alles andere dazwischen
-        return (0, 5)
+        return (0, 0)
     plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("").map(_sortiment_key)
 
     # Zusatz-Sortimente (AVO, Werbemittel etc.) aus Kostenstellenplan generieren
