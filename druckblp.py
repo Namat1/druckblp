@@ -1953,7 +1953,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     # Quelldaten pro Kunde (SAP vs KSP) als JSON für die Sideview
     source_data: Dict[str, dict] = {}
     _src_cols_sap = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "KSP_Schluessel"]
-    _src_cols_ksp = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende"]
+    _src_cols_ksp = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "KSP_Schluessel"]
     for sap_nr, grp in _plan_grouped.items():
         ist_zusatz = grp["_ist_zusatz"].map(lambda v: v is True or v == "True") if "_ist_zusatz" in grp.columns else pd.Series(False, index=grp.index)
         sap_rows = grp[~ist_zusatz]
@@ -1993,7 +1993,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             data.ksp.forEach(function(r) {
                 var d = r.Liefertag || 'Unbekannt';
                 if (!days[d]) days[d] = [];
-                days[d].push({src:'CSB', sort:r.Sortiment||'', btag:r.Bestelltag_Name||'', bzeit:r.Bestellzeitende||'', ksp:''});
+                days[d].push({src:'CSB', sort:r.Sortiment||'', btag:r.Bestelltag_Name||'', bzeit:r.Bestellzeitende||'', ksp:r.KSP_Schluessel||''});
             });
             var sorted = Object.keys(days).sort(function(a,b) {
                 return (dayOrder[a]||99) - (dayOrder[b]||99);
