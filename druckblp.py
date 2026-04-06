@@ -414,7 +414,7 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
     merged["Sortiment"] = merged["sortiment"]
     merged["Bestelltag_Name"] = merged["bestelltag"]
     merged["Bestellzeitende"] = merged["bestellzeitende"]
-    merged["SortKey_Sortiment"] = merged["sortiment"]
+    merged["SortKey_Sortiment"] = merged["sortiment"].map(lambda n: (1, 0, n))
     merged["_ist_zusatz"] = True
 
     # Aufräumen: nur plan_rows-Spalten behalten, Rest auffüllen
