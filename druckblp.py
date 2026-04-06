@@ -2003,6 +2003,11 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             sorted.forEach(function(day) {
                 var rows = days[day];
                 rows.sort(function(a,b) {
+                    var pinWords = ['fleisch','heidemark'];
+                    var al = a.sort.toLowerCase(), bl = b.sort.toLowerCase();
+                    var ap = pinWords.some(function(w){return al.indexOf(w)!==-1;});
+                    var bp = pinWords.some(function(w){return bl.indexOf(w)!==-1;});
+                    if (ap !== bp) return ap ? -1 : 1;
                     var sa = a.src === 'SAP' ? 0 : 1;
                     var sb = b.src === 'SAP' ? 0 : 1;
                     if (sa !== sb) return sa - sb;
