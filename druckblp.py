@@ -379,7 +379,7 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
 
     # Basis-Info pro (SAP_Nr, Liefertag): nimm erste Zeile
     basis_cols = ["SAP_Nr", "Liefertag", "KSP_Schluessel",
-                  "CSB Tournummer", "Verladetor", "Rahmentour_Raw",
+                  "Rahmentour_Raw",
                   "Bestelltag", "SortKey_Bestelltag",
                   "CSB_Nr", "Name", "Strasse", "PLZ", "Ort", "Fachberater",
                   "Liefertyp_ID", "Liefertyp_Name"]
@@ -485,8 +485,6 @@ def prepare_dataframes(
     )
     plan_rows["Sortiment"] = plan_rows["Liefertyp_Name"].fillna("")
     plan_rows["Bestellzeitende"] = plan_rows["Bestellzeitende"].fillna("")
-    plan_rows["CSB Tournummer"] = ""
-    plan_rows["Verladetor"] = ""
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
     # Sortiment-Priorität: Fleisch/Heidemark zuerst, Zusatz-Kram zuletzt
     def _sortiment_key(name: str) -> tuple:
@@ -970,7 +968,7 @@ def export_css() -> str:
         /* ══════════════════════════════════════
            COVER / SEPARATOR
         ══════════════════════════════════════ */
-        .cover-page, .separator-page {
+        .separator-page {
             width: 210mm;
             min-height: 297mm;
             margin: 0 auto 28px auto;
@@ -984,9 +982,9 @@ def export_css() -> str:
             text-align: center;
             border-radius: 3px;
         }
-        .cover-page h1, .separator-page h1 { font-size: 26pt; color: #003366; margin-bottom: 8mm; }
-        .cover-page h2, .separator-page h2 { font-size: 15pt; color: #333; margin-bottom: 4mm; }
-        .cover-page p, .separator-page p   { font-size: 10pt; color: #666; margin: 1mm 0; }
+        .separator-page h1 { font-size: 26pt; color: #003366; margin-bottom: 8mm; }
+        .separator-page h2 { font-size: 15pt; color: #333; margin-bottom: 4mm; }
+        .separator-page p   { font-size: 10pt; color: #666; margin: 1mm 0; }
 
         /* ══════════════════════════════════════
            SUCHE / HIGHLIGHT
@@ -1126,38 +1124,16 @@ def export_css() -> str:
 
 
 def render_tour_overview(customer_rows: pd.DataFrame) -> str:
-    """Baut die Tourübersicht: Liefertag -> optional CSB-Tournummern."""
+    """Baut die Tourübersicht: zeigt vorhandene Liefertage."""
     if customer_rows.empty:
         return ""
 
     day_order = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
-    # Alle Liefertage aus plan_rows sammeln (unabhängig von CSB)
     all_days = set(
         d for d in customer_rows["Liefertag"].dropna().unique()
         if d and d != "Unbekannt"
     )
-
-    # CSB-Touren pro Tag (falls vorhanden)
-    tour_by_day: dict = {}
-    csb_col = customer_rows["CSB Tournummer"].fillna("")
-    relevant = customer_rows[csb_col != ""].copy()
-    if not relevant.empty:
-        csb_first_digit = relevant["CSB Tournummer"].str.extract(r'^(\d)', expand=False).fillna("")
-        relevant["_day"] = csb_first_digit.map(
-            lambda d: WOCHENTAGE.get(int(d), "") if d.isdigit() else ""
-        )
-        fallback_mask = relevant["_day"] == ""
-        relevant.loc[fallback_mask, "_day"] = relevant.loc[fallback_mask, "Liefertag"].fillna("")
-        relevant = relevant[relevant["_day"] != ""]
-
-        for day, grp in relevant.groupby("_day", sort=False):
-            unique_tours = list(dict.fromkeys(
-                t for t in grp["CSB Tournummer"].tolist() if t
-            ))
-            if unique_tours:
-                tour_by_day[day] = unique_tours
-                all_days.add(day)
 
     if not all_days:
         return ""
@@ -1170,19 +1146,9 @@ def render_tour_overview(customer_rows: pd.DataFrame) -> str:
         f'<span style="display:inline-block;width:{col_w}">{html.escape(d)}</span>' for d in days_present
     )
 
-    # Tour-Zeile nur wenn CSB-Daten vorhanden
-    tour_line = ""
-    if tour_by_day:
-        tour_spans = "".join(
-            f'<span style="display:inline-block;width:{col_w}">{"  ".join(html.escape(t) for t in tour_by_day.get(d, []))}</span>'
-            for d in days_present
-        )
-        tour_line = f'<div><strong style="display:inline-block;width:{label_w}">Tour:</strong>{tour_spans}</div>'
-
     return f"""
     <div style="font-size:9pt; margin-bottom:2.5mm; line-height:1.6;">
         <div><strong style="display:inline-block;width:{label_w}">Liefertag:</strong>{day_spans}</div>
-        {tour_line}
     </div>
     """
 
@@ -1319,7 +1285,6 @@ def render_customer_plan(
     daher kein erneuter normalize_text-Aufruf nötig.
     """
     sap_nr      = str(customer.get("SAP_Nr", ""))
-    csb_nr      = str(customer.get("CSB_Nr", ""))
     name        = str(customer.get("Name", ""))
     strasse     = str(customer.get("Strasse", ""))
     plz         = str(customer.get("PLZ", ""))
@@ -1331,9 +1296,6 @@ def render_customer_plan(
 
     tour_overview_html = render_tour_overview(customer_rows)
     plan_table_html    = render_plan_table(customer_rows)
-
-    # Kunden-Nr. im Kopf immer aus der SAP-Nummer
-    kunden_nr = sap_nr
 
     return f"""
     <div class="paper">
@@ -1359,7 +1321,7 @@ def render_customer_plan(
 
         <!-- ===== INFOLEISTE ===== -->
         <div class="doc-infobar">
-            <span><strong>Kunden-Nr.:</strong> {html.escape(kunden_nr)}</span>
+            <span><strong>Kunden-Nr.:</strong> {html.escape(sap_nr)}</span>
             <span><strong>Fachberater:</strong> {html.escape(fachberater)}</span>
             <span><strong>Stand:</strong> {html.escape(stand)}</span>
             <button type="button" class="src-btn" onclick="openSourcePanel('{html.escape(sap_nr)}')">&#128270; Quelldaten</button>
@@ -1449,6 +1411,80 @@ def render_export_search_toolbar(massendruck_section: str = "", logo_b64: str = 
     """
 
 
+def _build_debug_html(data: Optional[Dict[str, pd.DataFrame]]) -> str:
+    if not data:
+        return ""
+    sections = []
+    all_csv_parts: List[str] = []
+
+    for title, df in data.items():
+        count = len(df)
+        icon = "✅" if count == 0 else "⚠️"
+        if df.empty:
+            rows_html = "<tr><td colspan='99' style='color:#888;padding:8px'>Keine Einträge</td></tr>"
+            thead_html = ""
+            export_btn = ""
+        else:
+            cols = list(df.columns)
+            thead_html = "<thead><tr>" + "".join(f"<th>{html.escape(c)}</th>" for c in cols) + "</tr></thead>"
+            rows_html_parts: List[str] = []
+            csv_lines: List[str] = [";".join(cols)]
+            for _, row in df.iterrows():
+                row_cells = [str(row[c]) for c in cols]
+                rows_html_parts.append("<tr>" + "".join(
+                    f"<td>{html.escape(cell)}</td>" for cell in row_cells
+                ) + "</tr>")
+                csv_lines.append(";".join(f'"{cell}"' for cell in row_cells))
+            rows_html = "".join(rows_html_parts)
+
+            csv_bytes = "\n".join(csv_lines).encode("utf-8-sig")
+            csv_b64 = base64.b64encode(csv_bytes).decode()
+            safe_title = title.replace("/", "-").replace(" ", "_")
+            export_btn = (
+                f'<a class="dbg-export" '
+                f'href="data:text/csv;base64,{csv_b64}" '
+                f'download="debug_{html.escape(safe_title)}.csv">&#8595; CSV</a>'
+            )
+
+            all_csv_parts.append(f"=== {title} ===")
+            all_csv_parts.extend(csv_lines)
+            all_csv_parts.append("")
+
+        sections.append(f"""
+        <div class="dbg-section">
+            <div class="dbg-title" onclick="this.parentElement.classList.toggle('open')">
+                <span>{icon} {html.escape(title)}</span>
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <span class="dbg-count">{count}</span>
+                    {export_btn}
+                </div>
+            </div>
+            <div class="dbg-body">
+                <table class="dbg-table">
+                    {thead_html}
+                    <tbody>{rows_html}</tbody>
+                </table>
+            </div>
+        </div>""")
+
+    if all_csv_parts:
+        all_bytes = "\n".join(all_csv_parts).encode("utf-8-sig")
+        all_b64 = base64.b64encode(all_bytes).decode()
+        gesamt_btn = (
+            f'<a class="dbg-gesamt-export" '
+            f'href="data:text/csv;base64,{all_b64}" '
+            f'download="sendeplan_debug_gesamt.csv">&#8595; Alle exportieren</a>'
+        )
+        sections.insert(0, f'<div style="padding:0 0 12px 0;">{gesamt_btn}</div>')
+
+    return "".join(sections)
+
+
+def _rows_to_list(df: pd.DataFrame, cols: List[str]) -> list:
+    avail = [c for c in cols if c in df.columns]
+    return df[avail].fillna("").astype(str).to_dict(orient="records")
+
+
 def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, logo_b64: str = "", logo_mime: str = "image/png", sidebar_logo_b64: str = "", sidebar_logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None) -> str:
     # Logo einmalig als JS-Variable – wird nach DOMContentLoaded auf alle Bilder gesetzt.
     # Spart mehrere MB bei größeren Kundenstämmen (logo_b64 × N Kunden).
@@ -1465,78 +1501,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     else:
         logo_head_script = ""
 
-    def _build_debug_html(data: Optional[Dict[str, pd.DataFrame]]) -> str:
-        if not data:
-            return ""
-        sections = []
-        all_csv_parts: List[str] = []
-
-        for title, df in data.items():
-            count = len(df)
-            icon = "✅" if count == 0 else "⚠️"
-            if df.empty:
-                rows_html = "<tr><td colspan='99' style='color:#888;padding:8px'>Keine Einträge</td></tr>"
-                thead_html = ""
-                export_btn = ""
-            else:
-                cols = list(df.columns)
-                # Thead
-                thead_html = "<thead><tr>" + "".join(f"<th>{html.escape(c)}</th>" for c in cols) + "</tr></thead>"
-                # Tbody + CSV in einem Durchgang
-                rows_html_parts: List[str] = []
-                csv_lines: List[str] = [";".join(cols)]
-                for _, row in df.iterrows():
-                    row_cells = [str(row[c]) for c in cols]
-                    rows_html_parts.append("<tr>" + "".join(
-                        f"<td>{html.escape(cell)}</td>" for cell in row_cells
-                    ) + "</tr>")
-                    csv_lines.append(";".join(f'"{cell}"' for cell in row_cells))
-                rows_html = "".join(rows_html_parts)
-
-                # CSV als data-URI für diesen Report
-                csv_bytes = "\n".join(csv_lines).encode("utf-8-sig")
-                csv_b64 = base64.b64encode(csv_bytes).decode()
-                safe_title = title.replace("/", "-").replace(" ", "_")
-                export_btn = (
-                    f'<a class="dbg-export" '
-                    f'href="data:text/csv;base64,{csv_b64}" '
-                    f'download="debug_{html.escape(safe_title)}.csv">&#8595; CSV</a>'
-                )
-
-                # Für Gesamt-Export sammeln
-                all_csv_parts.append(f"=== {title} ===")
-                all_csv_parts.extend(csv_lines)
-                all_csv_parts.append("")
-
-            sections.append(f"""
-            <div class="dbg-section">
-                <div class="dbg-title" onclick="this.parentElement.classList.toggle('open')">
-                    <span>{icon} {html.escape(title)}</span>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <span class="dbg-count">{count}</span>
-                        {export_btn}
-                    </div>
-                </div>
-                <div class="dbg-body">
-                    <table class="dbg-table">
-                        {thead_html}
-                        <tbody>{rows_html}</tbody>
-                    </table>
-                </div>
-            </div>""")
-
-        # Gesamt-Export
-        if all_csv_parts:
-            all_bytes = "\n".join(all_csv_parts).encode("utf-8-sig")
-            all_b64 = base64.b64encode(all_bytes).decode()
-            gesamt_btn = (
-                f'<a class="dbg-gesamt-export" '
-                f'href="data:text/csv;base64,{all_b64}" '
-                f'download="sendeplan_debug_gesamt.csv">&#8595; Alle exportieren</a>'
-            )
-            sections.insert(0, f'<div style="padding:0 0 12px 0;">{gesamt_btn}</div>')
-
-        return "".join(sections)
 
     # ── Massendruck: JSON-Daten + Sidebar-Sektion + JS aufbauen ──
     if massendruck_data:
@@ -1909,18 +1873,13 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         sap = customer.get("SAP_Nr", "")
         rows = _plan_grouped.get(sap, pd.DataFrame(columns=plan_rows.columns)).copy()
         csb_nr = customer.get("CSB_Nr", "")
-        csb_touren = sorted({
-            normalize_text(value)
-            for value in rows.get("CSB Tournummer", pd.Series(dtype=str)).tolist()
-            if normalize_text(value)
-        })
         # Volltext-Blob: alle durchsuchbaren Felder zusammenfassen
         sortimente_text = " ".join(sorted({
             normalize_text(v) for v in rows.get("Sortiment", pd.Series(dtype=str)).tolist() if normalize_text(v)
         }))
         search_blob = " ".join(
             part for part in [
-                sap, csb_nr, " ".join(csb_touren),
+                sap, csb_nr,
                 customer.get("Name", ""),
                 customer.get("Ort", ""),
                 customer.get("PLZ", ""),
@@ -1937,13 +1896,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             entry_parts.append(render_separator_page(customer))
         entry_parts.append(render_customer_plan(customer, rows, logo_b64="", logo_mime=logo_mime, bulk_mode=True))
 
-        csb_search = " ".join([part for part in [csb_nr, *csb_touren] if part]).lower()
         cust_name_escaped = html.escape(str(customer.get("Name", "")).lower())
         docs_buffer.write(
             f'<section class="customer-entry" '
             f'data-idx="{entry_count}" '
             f'data-sap="{html.escape(sap.lower())}" '
-            f'data-csb="{html.escape(csb_search)}" '
+            f'data-csb="{html.escape(csb_nr.lower())}" '
             f'data-name="{cust_name_escaped}">'
             f'{"".join(entry_parts)}'
             f'</section>'
@@ -1952,18 +1910,14 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
 
     # Quelldaten pro Kunde (SAP vs KSP) als JSON für die Sideview
     source_data: Dict[str, dict] = {}
-    _src_cols_sap = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "KSP_Schluessel"]
-    _src_cols_ksp = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "KSP_Schluessel"]
+    _src_cols = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "KSP_Schluessel"]
     for sap_nr, grp in _plan_grouped.items():
         ist_zusatz = grp["_ist_zusatz"].map(lambda v: v is True or v == "True") if "_ist_zusatz" in grp.columns else pd.Series(False, index=grp.index)
         sap_rows = grp[~ist_zusatz]
         ksp_rows = grp[ist_zusatz]
-        def _rows_to_list(df, cols):
-            avail = [c for c in cols if c in df.columns]
-            return df[avail].fillna("").astype(str).to_dict(orient="records")
         source_data[str(sap_nr).lower()] = {
-            "sap": _rows_to_list(sap_rows, _src_cols_sap),
-            "ksp": _rows_to_list(ksp_rows, _src_cols_ksp),
+            "sap": _rows_to_list(sap_rows, _src_cols),
+            "ksp": _rows_to_list(ksp_rows, _src_cols),
         }
 
     source_data_script = (
@@ -2479,9 +2433,8 @@ def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> N
         return
 
     table = customer_rows.sort_values(["SortKey_Bestelltag", "SortKey_Sortiment", "Bestellzeitende"], ascending=[True, True, False]).copy()
-    table = table[["Liefertag", "CSB Tournummer", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "Verladetor"]].rename(
+    table = table[["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende"]].rename(
         columns={
-            "CSB Tournummer": "CSB-Tour",
             "Sortiment": "Eintrag",
             "Bestelltag_Name": "Bestelltag",
         }
@@ -2570,7 +2523,6 @@ def main() -> None:
     )
 
     # ── Status-Zeile ──
-    uploaded = sum(1 for v in upload_map.values() if v is not None)
     file_names = [f'<span class="status-ok">✓ {html.escape(v.name)}</span>' if v else '<span class="status-miss">✗ fehlt</span>'
                   for k, v in upload_map.items()]
     labels = ["Kunden", "SAP", "Transport", "Kostenstellen"]
@@ -2655,7 +2607,6 @@ def main() -> None:
         if st.button("⚡ Plan generieren", use_container_width=True, type="primary"):
             progress = st.progress(0, text="Vorbereitung …")
             n = len(customers_df)
-            _plan_grouped = {sap: grp for sap, grp in plan_rows_df.groupby("SAP_Nr")}
             # Fortschritt: HTML-Build mit Zwischenmeldungen
             with st.spinner(f"Generiere HTML für {n} Kunden …"):
                 bulk_html = build_full_document_html(
