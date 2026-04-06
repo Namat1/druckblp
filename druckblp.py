@@ -427,6 +427,10 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
             merged[col] = ""
 
     combined = pd.concat([plan_rows, merged[plan_rows.columns]], ignore_index=True)
+    # _ist_zusatz markiert KSP-Zeilen – wird bei merged[plan_rows.columns] abgeschnitten,
+    # daher hier nachtragen: neue Zeilen (ab len(plan_rows)) sind KSP.
+    combined["_ist_zusatz"] = False
+    combined.loc[len(plan_rows):, "_ist_zusatz"] = True
     return combined
 
 
@@ -1951,7 +1955,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     _src_cols_sap = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "KSP_Schluessel"]
     _src_cols_ksp = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende"]
     for sap_nr, grp in _plan_grouped.items():
-        ist_zusatz = grp.get("_ist_zusatz", pd.Series(False, index=grp.index)).fillna(False)
+        ist_zusatz = grp["_ist_zusatz"].map(lambda v: v is True or v == "True") if "_ist_zusatz" in grp.columns else pd.Series(False, index=grp.index)
         sap_rows = grp[~ist_zusatz]
         ksp_rows = grp[ist_zusatz]
         def _rows_to_list(df, cols):
@@ -1989,7 +1993,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             data.ksp.forEach(function(r) {
                 var d = r.Liefertag || 'Unbekannt';
                 if (!days[d]) days[d] = [];
-                days[d].push({src:'KSP', sort:r.Sortiment||'', btag:r.Bestelltag_Name||'', bzeit:r.Bestellzeitende||'', ksp:''});
+                days[d].push({src:'CSB', sort:r.Sortiment||'', btag:r.Bestelltag_Name||'', bzeit:r.Bestellzeitende||'', ksp:''});
             });
             var sorted = Object.keys(days).sort(function(a,b) {
                 return (dayOrder[a]||99) - (dayOrder[b]||99);
@@ -2004,9 +2008,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 h += '<th style="width:42px">Quelle</th><th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th><th>KSP-Key</th>';
                 h += '</tr></thead><tbody>';
                 rows.forEach(function(r) {
-                    if (r.src === 'KSP') {
+                    if (r.src === 'CSB') {
                         h += '<tr style="background:#eefbf0;border-left:3px solid #1a9e52">';
-                        h += '<td style="font-size:9px;font-weight:800;color:#1a7f3c;letter-spacing:0.08em">KSP</td>';
+                        h += '<td style="font-size:9px;font-weight:800;color:#1a7f3c;letter-spacing:0.08em">CSB</td>';
                         h += '<td style="font-weight:600;color:#1a7f3c">' + esc(r.sort) + '</td>';
                     } else {
                         h += '<tr style="background:#f8faff;border-left:3px solid #4a90d9">';
