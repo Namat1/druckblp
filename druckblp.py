@@ -1103,13 +1103,6 @@ def export_css() -> str:
             flex: 1; overflow-y: auto; padding: 16px 20px;
             scrollbar-width: thin; scrollbar-color: #dde2ea transparent;
         }
-        .src-section-title {
-            font-size: 11px; font-weight: 700; text-transform: uppercase;
-            letter-spacing: 0.1em; margin: 16px 0 8px; padding: 6px 10px;
-            border-radius: 6px;
-        }
-        .src-section-title.src-sap { background: #eef4ff; color: #1a60b0; }
-        .src-section-title.src-ksp { background: #eefbf0; color: #1a7f3c; }
         .src-table {
             width: 100%; border-collapse: collapse; font-size: 11px;
             margin-bottom: 12px;
@@ -1124,12 +1117,6 @@ def export_css() -> str:
             padding: 5px 8px; border-bottom: 1px solid #f0f4f8; color: #2a3848;
         }
         .src-table tbody tr:hover td { background: #f5f7fa; }
-        .src-count {
-            font-size: 10px; font-weight: 600; padding: 1px 7px;
-            border-radius: 10px; margin-left: 6px;
-        }
-        .src-count-sap { background: #dbeafe; color: #1a60b0; }
-        .src-count-ksp { background: #d1fae5; color: #1a7f3c; }
     </style>
     """
 
@@ -1993,53 +1980,43 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         title.textContent = 'Quelldaten \\u2013 SAP ' + sap;
         if (!data) { body.innerHTML = '<p style="color:#888">Keine Daten.</p>'; }
         else {
-            // Alle Liefertage sammeln
             var days = {};
             data.sap.forEach(function(r) {
                 var d = r.Liefertag || 'Unbekannt';
-                if (!days[d]) days[d] = {sap:[], ksp:[]};
-                days[d].sap.push(r);
+                if (!days[d]) days[d] = [];
+                days[d].push({src:'SAP', sort:r.Sortiment||'', btag:r.Bestelltag_Name||'', bzeit:r.Bestellzeitende||'', ksp:r.KSP_Schluessel||''});
             });
             data.ksp.forEach(function(r) {
                 var d = r.Liefertag || 'Unbekannt';
-                if (!days[d]) days[d] = {sap:[], ksp:[]};
-                days[d].ksp.push(r);
+                if (!days[d]) days[d] = [];
+                days[d].push({src:'KSP', sort:r.Sortiment||'', btag:r.Bestelltag_Name||'', bzeit:r.Bestellzeitende||'', ksp:''});
             });
-            // Nach Wochentag sortieren
             var sorted = Object.keys(days).sort(function(a,b) {
                 return (dayOrder[a]||99) - (dayOrder[b]||99);
             });
 
             var h = '';
             sorted.forEach(function(day) {
-                var d = days[day];
-                var total = d.sap.length + d.ksp.length;
-                h += '<div style="margin:14px 0 6px;font-size:13px;font-weight:800;color:#1a2332;border-bottom:2px solid #e5e9f0;padding-bottom:4px">';
-                h += esc(day) + ' <span style="font-weight:400;color:#6b7a90;font-size:11px">(' + total + ')</span></div>';
-
-                if (d.sap.length) {
-                    h += '<div class="src-section-title src-sap">SAP <span class="src-count src-count-sap">' + d.sap.length + '</span></div>';
-                    h += '<table class="src-table"><thead><tr>';
-                    h += '<th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th><th>KSP-Key</th>';
-                    h += '</tr></thead><tbody>';
-                    d.sap.forEach(function(r) {
-                        h += '<tr><td>' + esc(r.Sortiment||'') + '</td>';
-                        h += '<td>' + esc(r.Bestelltag_Name||'') + '</td><td>' + esc(r.Bestellzeitende||'') + '</td>';
-                        h += '<td style="font-family:monospace;color:#6b7a90">' + esc(r.KSP_Schluessel||'') + '</td></tr>';
-                    });
-                    h += '</tbody></table>';
-                }
-                if (d.ksp.length) {
-                    h += '<div class="src-section-title src-ksp">KSP <span class="src-count src-count-ksp">' + d.ksp.length + '</span></div>';
-                    h += '<table class="src-table"><thead><tr>';
-                    h += '<th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th>';
-                    h += '</tr></thead><tbody>';
-                    d.ksp.forEach(function(r) {
-                        h += '<tr style="background:#f0fdf4"><td style="font-weight:600;color:#1a7f3c">' + esc(r.Sortiment||'') + '</td>';
-                        h += '<td>' + esc(r.Bestelltag_Name||'') + '</td><td>' + esc(r.Bestellzeitende||'') + '</td></tr>';
-                    });
-                    h += '</tbody></table>';
-                }
+                var rows = days[day];
+                h += '<div style="margin:18px 0 8px;font-size:13px;font-weight:800;color:#1a2332;border-bottom:2px solid #e5e9f0;padding-bottom:5px">';
+                h += esc(day) + '</div>';
+                h += '<table class="src-table"><thead><tr>';
+                h += '<th style="width:42px">Quelle</th><th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th><th>KSP-Key</th>';
+                h += '</tr></thead><tbody>';
+                rows.forEach(function(r) {
+                    if (r.src === 'KSP') {
+                        h += '<tr style="background:#eefbf0;border-left:3px solid #1a9e52">';
+                        h += '<td style="font-size:9px;font-weight:800;color:#1a7f3c;letter-spacing:0.08em">KSP</td>';
+                        h += '<td style="font-weight:600;color:#1a7f3c">' + esc(r.sort) + '</td>';
+                    } else {
+                        h += '<tr style="background:#f8faff;border-left:3px solid #4a90d9">';
+                        h += '<td style="font-size:9px;font-weight:800;color:#1a60b0;letter-spacing:0.08em">SAP</td>';
+                        h += '<td>' + esc(r.sort) + '</td>';
+                    }
+                    h += '<td>' + esc(r.btag) + '</td><td>' + esc(r.bzeit) + '</td>';
+                    h += '<td style="font-family:monospace;color:#6b7a90;font-size:10px">' + esc(r.ksp) + '</td></tr>';
+                });
+                h += '</tbody></table>';
             });
             body.innerHTML = h;
         }
