@@ -1993,8 +1993,8 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         if (!data) { body.innerHTML = '<p style="color:#888">Keine Daten.</p>'; }
         else {
             var h = '';
-            h += '<div class="src-section-title src-sap">SAP-Daten <span class="src-count src-count-sap">' + data.sap.length + '</span></div>';
             if (data.sap.length) {
+                h += '<div class="src-section-title src-sap">SAP-Daten <span class="src-count src-count-sap">' + data.sap.length + '</span></div>';
                 h += '<table class="src-table"><thead><tr>';
                 h += '<th>Liefertag</th><th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th><th>KSP-Key</th>';
                 h += '</tr></thead><tbody>';
@@ -2004,9 +2004,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     h += '<td style="font-family:monospace;color:#6b7a90">' + esc(r.KSP_Schluessel||'') + '</td></tr>';
                 });
                 h += '</tbody></table>';
-            } else { h += '<p style="color:#aaa;font-size:11px">Keine SAP-Zeilen.</p>'; }
-            h += '<div class="src-section-title src-ksp">KSP-Zusatz <span class="src-count src-count-ksp">' + data.ksp.length + '</span></div>';
+            }
             if (data.ksp.length) {
+                h += '<div class="src-section-title src-ksp">KSP-Zusatz <span class="src-count src-count-ksp">' + data.ksp.length + '</span></div>';
                 h += '<table class="src-table"><thead><tr>';
                 h += '<th>Liefertag</th><th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th>';
                 h += '</tr></thead><tbody>';
@@ -2015,7 +2015,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     h += '<td>' + esc(r.Bestelltag_Name||'') + '</td><td>' + esc(r.Bestellzeitende||'') + '</td></tr>';
                 });
                 h += '</tbody></table>';
-            } else { h += '<p style="color:#aaa;font-size:11px">Keine KSP-Zusatz-Zeilen.</p>'; }
+            }
             body.innerHTML = h;
         }
         document.getElementById('src-overlay').classList.add('open');
