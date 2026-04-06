@@ -623,50 +623,11 @@ def filter_customers(df_customers: pd.DataFrame, search_text: str) -> pd.DataFra
 def streamlit_css() -> str:
     return """
     <style>
-        /* Nur Custom-Classes – keine globalen Streamlit-Selektoren überschreiben,
-           damit Updates nicht brechen. Streamlit-Theme via .streamlit/config.toml setzen. */
         .status-ok   { color: #3fb950; font-size: 0.85rem; }
         .status-miss { color: #f85149; font-size: 0.85rem; }
-
-        /* Panel-Komponente */
-        .app-panel {
-            background: #161b22;
-            border: 1px solid #30363d;
-            border-radius: 10px;
-            padding: 1rem 1.1rem;
-            margin-bottom: 0.75rem;
-        }
-        .muted-note { color: #888; font-size: 0.82rem; }
-
-        /* Hero-Card */
-        .hero-card {
-            background: linear-gradient(135deg, #161b22 0%, #0d2035 100%);
-            border: 1px solid #30363d;
-            border-radius: 12px;
-            padding: 1.2rem 1.4rem;
-            margin-bottom: 1rem;
-        }
-
-        /* Status-Grid */
-        .status-grid { display: flex; flex-direction: column; gap: 0.35rem; }
-        .status-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.83rem; }
-        .status-label { color: #888; }
-        .upload-ok   { color: #3fb950; }
-        .upload-missing { color: #f85149; }
     </style>
     """
 
-
-def render_panel(title: str, body: str) -> None:
-    st.markdown(
-        f"""
-        <div class="app-panel">
-            <h3 style="margin-top:0; margin-bottom:0.75rem;">{html.escape(title)}</h3>
-            {body}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 # ============================================================
@@ -793,51 +754,6 @@ def export_css() -> str:
             border-color: var(--sb-active);
             box-shadow: 0 0 0 3px rgba(230,161,0,0.15);
         }
-        .filter-btn {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: 100%;
-            border: 1px solid transparent;
-            border-radius: 8px;
-            padding: 8px 11px;
-            font-size: 12px;
-            font-weight: 500;
-            font-family: inherit;
-            cursor: pointer;
-            background: transparent;
-            color: var(--sb-text);
-            text-align: left;
-            margin-bottom: 2px;
-            transition: all 0.14s;
-        }
-        .filter-btn:hover {
-            background: var(--sb-hover);
-            color: #0f1923;
-            border-color: var(--sb-border);
-        }
-        .filter-btn.active {
-            background: var(--sb-active);
-            color: #fff;
-            font-weight: 700;
-            border-color: transparent;
-            box-shadow: 0 2px 8px rgba(230,161,0,0.28);
-        }
-        .filter-btn .filter-count {
-            font-size: 10px;
-            font-family: 'Courier New', monospace;
-            font-weight: 600;
-            background: rgba(0,0,0,0.10);
-            color: inherit;
-            padding: 1px 6px;
-            border-radius: 20px;
-        }
-        .filter-btn.active .filter-count {
-            background: rgba(255,255,255,0.25);
-        }
-        .filter-btn-warn { color: #c0392b !important; font-weight: 600 !important; }
-        .filter-btn-warn:hover { background: rgba(192,57,43,0.08) !important; color: #a02010 !important; }
-        .filter-btn-warn.active { background: #c0392b !important; color: #fff !important; box-shadow: 0 2px 8px rgba(192,57,43,0.25) !important; }
         .search-btn {
             border: 1.5px solid var(--sb-border);
             border-radius: 7px;
@@ -1401,16 +1317,6 @@ def render_customer_plan(
     </div>
     """
 
-
-def render_cover_page(title: str, subtitle: str, lines: List[str]) -> str:
-    content = "".join(f"<p>{html.escape(normalize_text(line))}</p>" for line in lines)
-    return f"""
-    <div class="cover-page">
-        <h1>{html.escape(title)}</h1>
-        <h2>{html.escape(subtitle)}</h2>
-        {content}
-    </div>
-    """
 
 
 def render_separator_page(customer: pd.Series) -> str:
@@ -2364,29 +2270,6 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     """
 
 
-def build_single_document_html(customer: pd.Series, customer_rows: pd.DataFrame, logo_b64: str = "", logo_mime: str = "image/png") -> str:
-    return f"""
-    <!DOCTYPE html>
-    <html lang="de">
-    <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Sendeplan {html.escape(str(customer.get('SAP_Nr', '')))}</title>
-        {export_css()}
-    </head>
-    <body>
-        {render_customer_plan(customer, customer_rows, logo_b64=logo_b64, logo_mime=logo_mime)}
-    </body>
-    </html>
-    """
-
-
-@st.cache_data(show_spinner=False)
-def build_option_labels(df_customers: pd.DataFrame) -> Dict[str, str]:
-    return {
-        row["SAP_Nr"]: f"{row['SAP_Nr']} | {row['Name']} | {row['Ort']}"
-        for _, row in df_customers.iterrows()
-    }
 
 
 def init_session_state() -> None:
@@ -2399,70 +2282,11 @@ def init_session_state() -> None:
             st.session_state[_k] = False
 
 
-def set_category(category: str) -> None:
-    pass  # Kategorien entfernt
-
 
 def all_required_uploads_present(upload_map: Dict[str, Optional[object]]) -> bool:
     return all(upload_map.values())
 
 
-def upload_status_lines(upload_map: Dict[str, Optional[object]]) -> str:
-    labels = {
-        "kunden": "Kundenliste",
-        "sap": "SAP",
-        "transport": "Transportgruppen",
-        "kostenstellen": "Kostenstellen",
-    }
-    lines = []
-    for key, label in labels.items():
-        file = upload_map.get(key)
-        if file is None:
-            lines.append(f"<div class='status-item'><div class='status-label'>{label}</div><div class='upload-missing'>Fehlt noch</div></div>")
-        else:
-            lines.append(f"<div class='status-item'><div class='status-label'>{label}</div><div class='upload-ok'>{html.escape(file.name)}</div></div>")
-    return "<div class='status-grid'>" + "".join(lines) + "</div>"
-
-
-def show_onboarding(upload_map: Dict[str, Optional[object]]) -> None:
-    st.markdown(
-        """
-        <div class="hero-card">
-            <h1 style="margin:0;">📦 Sendeplan-Generator</h1>
-            <p style="margin:0.6rem 0 0 0;">Lade links alle fünf Quelldateien hoch. Danach bekommst du sofort Filter, Kundenvorschau und eine eigenständige HTML-Datei mit Suche nach SAP- und CSB-Nummer.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    col1, col2 = st.columns([3, 2], gap="large")
-    with col1:
-        render_panel(
-            "So funktioniert die App",
-            """
-            <ol style="margin:0; padding-left:1.1rem; line-height:1.7;">
-                <li>Links alle fünf Dateien hochladen.</li>
-                <li>Filter und Kundenauswahl werden automatisch freigeschaltet.</li>
-                <li>Im Bereich <strong>Export</strong> die Standalone-HTML herunterladen.</li>
-                <li>Die HTML im Browser öffnen und dort direkt nach SAP oder CSB suchen.</li>
-            </ol>
-            <p class="muted-note" style="margin-top:0.9rem;">Die App verarbeitet feste Spaltenpositionen. Es gibt keine automatische Erkennung.</p>
-            """,
-        )
-        render_panel(
-            "Pflichtdateien",
-            """
-            <ul style="margin:0; padding-left:1.1rem; line-height:1.7;">
-                <li>Kundenliste: A, I, J, K, L, M, N</li>
-                <li>SAP-Datei: A, G, H, I, O, P, Y</li>
-                <li>Transportgruppen: A, C</li>
-                <li>Kostenstellen: Erstes Sheet, A=Liefertag, B=Tourname, dann Sortiment-Gruppen</li>
-            </ul>
-            """,
-        )
-
-    with col2:
-        render_panel("Upload-Status", upload_status_lines(upload_map))
 
 
 def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> None:
