@@ -491,15 +491,15 @@ def prepare_dataframes(
     # Sortiment-Priorität: Fleisch/Heidemark zuerst, Zusatz-Kram zuletzt
     def _sortiment_key(name: str) -> tuple:
         n = str(name).strip().lower()
-        # CSB/Zusatz (Lagerware, AVO, Werbemittel, Hamburger Jungs, Divers) zuerst
-        if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
-            return (0, name)
-        # SAP-Sortimente (Fleisch, Heidemark etc.) danach
+        # SAP-Sortimente (Fleisch, Heidemark etc.) zuerst
         for key, prio in SORTIMENT_PRIO.items():
             if key in n:
-                return (5 + prio, name)
-        # Alles andere am Ende (alphabetisch)
-        return (9, name)
+                return (0, prio, name)
+        # CSB/Zusatz (Lagerware, AVO, Werbemittel, Hamburger Jungs, Divers) danach
+        if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
+            return (1, 0, name)
+        # Alles andere dazwischen (alphabetisch)
+        return (0, 5, name)
     plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("").map(_sortiment_key)
 
     # Zusatz-Sortimente (AVO, Werbemittel etc.) aus Kostenstellenplan generieren
@@ -2003,11 +2003,11 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             sorted.forEach(function(day) {
                 var rows = days[day];
                 rows.sort(function(a,b) {
-                    var sa = a.src === 'CSB' ? 0 : 1;
-                    var sb = b.src === 'CSB' ? 0 : 1;
+                    var sa = a.src === 'SAP' ? 0 : 1;
+                    var sb = b.src === 'SAP' ? 0 : 1;
                     if (sa !== sb) return sa - sb;
-                    if (a.bzeit < b.bzeit) return -1;
-                    if (a.bzeit > b.bzeit) return 1;
+                    if (a.bzeit > b.bzeit) return -1;
+                    if (a.bzeit < b.bzeit) return 1;
                     return 0;
                 });
                 h += '<div style="margin:18px 0 8px;font-size:13px;font-weight:800;color:#1a2332;border-bottom:2px solid #e5e9f0;padding-bottom:5px">';
@@ -2473,7 +2473,7 @@ def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> N
         st.warning("Für diesen Kunden sind aktuell keine Planzeilen vorhanden.")
         return
 
-    table = customer_rows.sort_values(["SortKey_Bestelltag", "CSB Tournummer", "SortKey_Sortiment", "Bestellzeitende"]).copy()
+    table = customer_rows.sort_values(["SortKey_Bestelltag", "SortKey_Sortiment", "Bestellzeitende"], ascending=[True, True, False]).copy()
     table = table[["Liefertag", "CSB Tournummer", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "Verladetor"]].rename(
         columns={
             "CSB Tournummer": "CSB-Tour",
