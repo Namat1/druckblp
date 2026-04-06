@@ -1068,12 +1068,12 @@ def export_css() -> str:
            QUELLDATEN-PANEL (rechte Sideview)
         ══════════════════════════════════════ */
         .src-btn {
-            background: none; border: 1.5px solid #d0d5dd; border-radius: 6px;
-            padding: 2px 10px; font-size: 10px; font-weight: 600;
-            color: #4a5568; cursor: pointer; font-family: inherit;
-            transition: all 0.15s; margin-left: 8px;
+            background: #eef4ff; border: 1.5px solid #93b4e0; border-radius: 6px;
+            padding: 3px 12px; font-size: 10px; font-weight: 700;
+            color: #1a60b0; cursor: pointer; font-family: inherit;
+            transition: all 0.15s; margin-left: auto;
         }
-        .src-btn:hover { background: #f0f4f8; border-color: #9aa5b4; color: #1a2332; }
+        .src-btn:hover { background: #dbeafe; border-color: #1a60b0; color: #0f4a8a; }
         @media print { .src-btn { display: none !important; } }
 
         .src-overlay {
