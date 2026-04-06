@@ -1985,6 +1985,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     <script>
     function openSourcePanel(sap) {
         function esc(s) { return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+        var dayOrder = {'Montag':1,'Dienstag':2,'Mittwoch':3,'Donnerstag':4,'Freitag':5,'Samstag':6,'Sonntag':7};
         var SD = window._sourceData || {};
         var data = SD[sap.toLowerCase()];
         var title = document.getElementById('src-panel-title');
@@ -1992,30 +1993,54 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         title.textContent = 'Quelldaten \\u2013 SAP ' + sap;
         if (!data) { body.innerHTML = '<p style="color:#888">Keine Daten.</p>'; }
         else {
+            // Alle Liefertage sammeln
+            var days = {};
+            data.sap.forEach(function(r) {
+                var d = r.Liefertag || 'Unbekannt';
+                if (!days[d]) days[d] = {sap:[], ksp:[]};
+                days[d].sap.push(r);
+            });
+            data.ksp.forEach(function(r) {
+                var d = r.Liefertag || 'Unbekannt';
+                if (!days[d]) days[d] = {sap:[], ksp:[]};
+                days[d].ksp.push(r);
+            });
+            // Nach Wochentag sortieren
+            var sorted = Object.keys(days).sort(function(a,b) {
+                return (dayOrder[a]||99) - (dayOrder[b]||99);
+            });
+
             var h = '';
-            if (data.sap.length) {
-                h += '<div class="src-section-title src-sap">SAP-Daten <span class="src-count src-count-sap">' + data.sap.length + '</span></div>';
-                h += '<table class="src-table"><thead><tr>';
-                h += '<th>Liefertag</th><th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th><th>KSP-Key</th>';
-                h += '</tr></thead><tbody>';
-                data.sap.forEach(function(r) {
-                    h += '<tr><td>' + esc(r.Liefertag||'') + '</td><td>' + esc(r.Sortiment||'') + '</td>';
-                    h += '<td>' + esc(r.Bestelltag_Name||'') + '</td><td>' + esc(r.Bestellzeitende||'') + '</td>';
-                    h += '<td style="font-family:monospace;color:#6b7a90">' + esc(r.KSP_Schluessel||'') + '</td></tr>';
-                });
-                h += '</tbody></table>';
-            }
-            if (data.ksp.length) {
-                h += '<div class="src-section-title src-ksp">KSP-Zusatz <span class="src-count src-count-ksp">' + data.ksp.length + '</span></div>';
-                h += '<table class="src-table"><thead><tr>';
-                h += '<th>Liefertag</th><th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th>';
-                h += '</tr></thead><tbody>';
-                data.ksp.forEach(function(r) {
-                    h += '<tr style="background:#f0fdf4"><td>' + esc(r.Liefertag||'') + '</td><td style="font-weight:600;color:#1a7f3c">' + esc(r.Sortiment||'') + '</td>';
-                    h += '<td>' + esc(r.Bestelltag_Name||'') + '</td><td>' + esc(r.Bestellzeitende||'') + '</td></tr>';
-                });
-                h += '</tbody></table>';
-            }
+            sorted.forEach(function(day) {
+                var d = days[day];
+                var total = d.sap.length + d.ksp.length;
+                h += '<div style="margin:14px 0 6px;font-size:13px;font-weight:800;color:#1a2332;border-bottom:2px solid #e5e9f0;padding-bottom:4px">';
+                h += esc(day) + ' <span style="font-weight:400;color:#6b7a90;font-size:11px">(' + total + ')</span></div>';
+
+                if (d.sap.length) {
+                    h += '<div class="src-section-title src-sap">SAP <span class="src-count src-count-sap">' + d.sap.length + '</span></div>';
+                    h += '<table class="src-table"><thead><tr>';
+                    h += '<th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th><th>KSP-Key</th>';
+                    h += '</tr></thead><tbody>';
+                    d.sap.forEach(function(r) {
+                        h += '<tr><td>' + esc(r.Sortiment||'') + '</td>';
+                        h += '<td>' + esc(r.Bestelltag_Name||'') + '</td><td>' + esc(r.Bestellzeitende||'') + '</td>';
+                        h += '<td style="font-family:monospace;color:#6b7a90">' + esc(r.KSP_Schluessel||'') + '</td></tr>';
+                    });
+                    h += '</tbody></table>';
+                }
+                if (d.ksp.length) {
+                    h += '<div class="src-section-title src-ksp">KSP <span class="src-count src-count-ksp">' + d.ksp.length + '</span></div>';
+                    h += '<table class="src-table"><thead><tr>';
+                    h += '<th>Sortiment</th><th>Bestelltag</th><th>Bestellzeit</th>';
+                    h += '</tr></thead><tbody>';
+                    d.ksp.forEach(function(r) {
+                        h += '<tr style="background:#f0fdf4"><td style="font-weight:600;color:#1a7f3c">' + esc(r.Sortiment||'') + '</td>';
+                        h += '<td>' + esc(r.Bestelltag_Name||'') + '</td><td>' + esc(r.Bestellzeitende||'') + '</td></tr>';
+                    });
+                    h += '</tbody></table>';
+                }
+            });
             body.innerHTML = h;
         }
         document.getElementById('src-overlay').classList.add('open');
