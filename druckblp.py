@@ -462,9 +462,9 @@ def prepare_dataframes(
 
     df_sap = df_sap.merge(df_transport, on="Liefertyp_ID", how="left")
 
-    # Echte Duplikate aus SAP entfernen: gleiche SAP + Bestelltag + Sortiment + Rahmentour.
+    # Echte Duplikate aus SAP entfernen: gleiche SAP + Liefertag + Bestelltag + Sortiment.
     df_sap = df_sap.drop_duplicates(
-        subset=["SAP_Nr", "Bestelltag", "Liefertyp_ID", "Rahmentour_Raw"], keep="first"
+        subset=["SAP_Nr", "Liefertag_Raw", "Bestelltag", "Liefertyp_ID"], keep="first"
     ).copy()
 
     kunden_basis = df_kunden.merge(
