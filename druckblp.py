@@ -454,6 +454,17 @@ def prepare_dataframes(
     # Nur Zeilen mit Warengruppe FLEISCH (Spalte C) übernehmen
     df_sap = df_sap[df_sap["Warengruppe"].str.upper().str.strip() == "FLEISCH"].copy()
     df_sap = df_sap.drop(columns=["Warengruppe"])
+
+    # Jede FLEISCH-Zeile MUSS einen KSP-Schlüssel haben – Zeilen ohne werden entfernt + Warnung
+    _ksp_missing = df_sap["KSP_Schluessel"].isna() | (df_sap["KSP_Schluessel"].astype(str).str.strip() == "")
+    if _ksp_missing.any():
+        _n_miss = int(_ksp_missing.sum())
+        _sample = df_sap.loc[_ksp_missing, "SAP_Nr"].head(10).tolist()
+        st.warning(
+            f"{_n_miss} FLEISCH-Zeile(n) ohne KSP-Schlüssel entfernt. "
+            f"Betroffene SAP-Nr (max. 10): {', '.join(str(s) for s in _sample)}"
+        )
+        df_sap = df_sap[~_ksp_missing].copy()
     df_transport = load_structured_upload(transport_bytes, transport_name, csv_separator, "transport")
 
     # normalize_text wurde bereits in cleanup_dataframe() angewendet – kein zweiter Pass nötig.
