@@ -417,6 +417,7 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
     merged["Bestellzeitende"] = merged["bestellzeitende"]
     merged["SortKey_Sortiment"] = merged["sortiment"].map(lambda n: (1, 0))
     merged["_ist_zusatz"] = True
+    merged["Liefertyp_ID"] = ""
 
     # Aufräumen: nur plan_rows-Spalten behalten, Rest auffüllen
     drop_cols = ["_ksp_norm", "_lt_norm", "ksp_schluessel", "liefertag", "sortiment",
