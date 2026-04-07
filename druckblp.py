@@ -44,6 +44,17 @@ SORTIMENT_PRIO = {
 }
 SORTIMENT_ZUSATZ_KEYWORDS = ("avo", "werbemittel", "hamburger jungs", "lagerware", "divers")
 
+
+def _sortiment_key(name: str) -> tuple:
+    """Sortiment-Priorität: Fleisch/Heidemark zuerst, Zusatz-Kram zuletzt."""
+    n = str(name).strip().lower()
+    for key, prio in SORTIMENT_PRIO.items():
+        if key in n:
+            return (-1, prio)
+    if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
+        return (1, 0)
+    return (0, 0)
+
 # Zusatz-Sortimente aus KSP Sheet.
 # Spalte A(0) = Liefertag (1=Mo..6=Sa), B(1) = Tourname (Join-Key zu SAP.P).
 # Danach je 3 Spalten pro Sortiment: Name | Uhrzeit | Bestelltag
@@ -139,8 +150,6 @@ def day_name_from_number(value) -> str:
         return WOCHENTAGE.get(int(str(value).strip()), "Unbekannt")
     except (TypeError, ValueError):
         return "Unbekannt"
-
-
 
 
 def validate_required_columns(df: pd.DataFrame, required_columns: List[str], name: str) -> None:
@@ -247,8 +256,6 @@ def load_structured_upload(file_bytes: bytes, filename: str, csv_separator: str,
     return structured_df
 
 
-
-
 # ============================================================
 # ZUSATZ-SORTIMENTE AUS KOSTENSTELLENPLAN (AVO, WERBEMITTEL …)
 # ============================================================
@@ -307,7 +314,12 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
 
     Ergebnis-DataFrame: ksp_schluessel | liefertag | sortiment | bestelltag | bestellzeitende
     """
-    wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+    except Exception as exc:
+        raise ValueError(
+            f"Kostenstellenplan konnte nicht als Excel gelesen werden ({filename}): {exc}"
+        ) from exc
     # Erstes Sheet verwenden (heißt je nach Datei "Tabelle1", "CSB Standard" o.ä.)
     ws = wb[wb.sheetnames[0]]
     all_rows = list(ws.iter_rows(values_only=True))
@@ -436,9 +448,6 @@ def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFram
     return combined
 
 
-
-
-
 def prepare_dataframes(
     kunden_bytes: bytes,
     kunden_name: str,
@@ -502,18 +511,6 @@ def prepare_dataframes(
     plan_rows["Sortiment"] = plan_rows["Liefertyp_Name"].fillna("")
     plan_rows["Bestellzeitende"] = plan_rows["Bestellzeitende"].fillna("")
     plan_rows["SortKey_Bestelltag"] = pd.to_numeric(plan_rows["Bestelltag"], errors="coerce").fillna(99)
-    # Sortiment-Priorität: Fleisch/Heidemark zuerst, Zusatz-Kram zuletzt
-    def _sortiment_key(name: str) -> tuple:
-        n = str(name).strip().lower()
-        # Fleisch/Heidemark IMMER ganz oben (Gruppe -1)
-        for key, prio in SORTIMENT_PRIO.items():
-            if key in n:
-                return (-1, prio)
-        # CSB/Zusatz danach
-        if any(k in n for k in SORTIMENT_ZUSATZ_KEYWORDS):
-            return (1, 0)
-        # Alles andere dazwischen
-        return (0, 0)
     plan_rows["SortKey_Sortiment"] = plan_rows["Sortiment"].fillna("").map(_sortiment_key)
 
     # Zusatz-Sortimente (AVO, Werbemittel etc.) aus Kostenstellenplan generieren
@@ -532,7 +529,6 @@ def prepare_dataframes(
     ).str.lower()
 
     return kunden_basis, plan_rows, counts, df_sap
-
 
 
 # ============================================================
@@ -645,7 +641,6 @@ def streamlit_css() -> str:
         .status-miss { color: #f85149; font-size: 0.85rem; }
     </style>
     """
-
 
 
 # ============================================================
@@ -1198,12 +1193,14 @@ def render_plan_table(rows: pd.DataFrame) -> str:
     ordered["_time_order"] = ordered["Bestellzeitende"].map(normalize_text).map(time_to_minutes)
     ordered = ordered.sort_values(["_day_order", "SortKey_Sortiment", "_time_order"], ascending=[True, True, False])
 
-    # Rowspan pro Liefertag zählen
-    day_counts: dict = {}
+    # Rowspan pro Liefertag zählen + HTML in einem Pass
     _rec_cols = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende"]
     if "Liefertyp_ID" in ordered.columns:
         _rec_cols.append("Liefertyp_ID")
     records = ordered[_rec_cols].fillna("").to_dict("records")
+
+    # Erst Counts ermitteln (schneller Vorlauf)
+    day_counts: dict = {}
     for rec in records:
         d = rec["Liefertag"] or "Unbekannt"
         day_counts[d] = day_counts.get(d, 0) + 1
@@ -1294,7 +1291,6 @@ def _logo_bulk_placeholder() -> str:
     )
 
 
-
 def render_customer_plan(
     customer: pd.Series,
     customer_rows: pd.DataFrame,
@@ -1359,7 +1355,6 @@ def render_customer_plan(
     </div>
     </div>
     """
-
 
 
 def render_separator_page(customer: pd.Series) -> str:
@@ -1451,8 +1446,8 @@ def _build_debug_html(data: Optional[Dict[str, pd.DataFrame]]) -> str:
             thead_html = "<thead><tr>" + "".join(f"<th>{html.escape(c)}</th>" for c in cols) + "</tr></thead>"
             rows_html_parts: List[str] = []
             csv_lines: List[str] = [";".join(cols)]
-            for _, row in df.iterrows():
-                row_cells = [str(row[c]) for c in cols]
+            for rec in df.to_dict("records"):
+                row_cells = [str(rec[c]) for c in cols]
                 rows_html_parts.append("<tr>" + "".join(
                     f"<td>{html.escape(cell)}</td>" for cell in row_cells
                 ) + "</tr>")
@@ -1934,7 +1929,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     source_data: Dict[str, dict] = {}
     _src_cols = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende", "KSP_Schluessel"]
     for sap_nr, grp in _plan_grouped.items():
-        ist_zusatz = grp["_ist_zusatz"].map(lambda v: v is True or v == "True") if "_ist_zusatz" in grp.columns else pd.Series(False, index=grp.index)
+        ist_zusatz = grp["_ist_zusatz"].astype(bool) if "_ist_zusatz" in grp.columns else pd.Series(False, index=grp.index)
         sap_rows = grp[~ist_zusatz]
         ksp_rows = grp[ist_zusatz]
         source_data[str(sap_nr).lower()] = {
@@ -2289,6 +2284,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📦</text></svg>">
         <title>Sendeplan-Export</title>
         {export_css()}
         <style>
@@ -2411,23 +2407,12 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     """
 
 
-
-
 def init_session_state() -> None:
-    if "selected_sap" not in st.session_state:
-        st.session_state.selected_sap = ""
-    if "search_text" not in st.session_state:
-        st.session_state.search_text = ""
-    for _k in ["_massendruck_ready"]:
-        if _k not in st.session_state:
-            st.session_state[_k] = False
-
+    pass  # Session-State wird bei Bedarf in main() gesetzt
 
 
 def all_required_uploads_present(upload_map: Dict[str, Optional[object]]) -> bool:
     return all(upload_map.values())
-
-
 
 
 def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> None:
