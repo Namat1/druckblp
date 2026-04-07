@@ -84,6 +84,7 @@ UPLOAD_CONFIG = {
         "help": "Verwendet feste Excel-Spalten: A, G, H, I, O, P, Y",
         "mapping": {
             "SAP_Nr": "A",
+            "Warengruppe": "C",
             "Liefertag_Raw": "G",
             "Bestelltag": "H",
             "Bestellzeitende": "I",
@@ -450,6 +451,9 @@ def prepare_dataframes(
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int], pd.DataFrame]:
     df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
     df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
+    # Nur Zeilen mit Warengruppe FLEISCH (Spalte C) übernehmen
+    df_sap = df_sap[df_sap["Warengruppe"].str.upper().str.strip() == "FLEISCH"].copy()
+    df_sap = df_sap.drop(columns=["Warengruppe"])
     df_transport = load_structured_upload(transport_bytes, transport_name, csv_separator, "transport")
 
     # normalize_text wurde bereits in cleanup_dataframe() angewendet – kein zweiter Pass nötig.
