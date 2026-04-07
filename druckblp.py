@@ -1199,7 +1199,10 @@ def render_plan_table(rows: pd.DataFrame) -> str:
 
     # Rowspan pro Liefertag zählen
     day_counts: dict = {}
-    records = ordered[["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende"]].fillna("").to_dict("records")
+    _rec_cols = ["Liefertag", "Sortiment", "Bestelltag_Name", "Bestellzeitende"]
+    if "Liefertyp_ID" in ordered.columns:
+        _rec_cols.append("Liefertyp_ID")
+    records = ordered[_rec_cols].fillna("").to_dict("records")
     for rec in records:
         d = rec["Liefertag"] or "Unbekannt"
         day_counts[d] = day_counts.get(d, 0) + 1
@@ -1209,7 +1212,10 @@ def render_plan_table(rows: pd.DataFrame) -> str:
 
     for rec in records:
         day        = rec["Liefertag"] or "Unbekannt"
+        tg_id      = str(rec.get("Liefertyp_ID", "")).strip()
         sortiment  = rec["Sortiment"]
+        # Transportgruppen-Nummer vor Sortiment anzeigen
+        sort_display = f"{tg_id} – {sortiment}" if tg_id and sortiment else sortiment or tg_id
         bestelltag = rec["Bestelltag_Name"]
         zeitende   = rec["Bestellzeitende"]
 
@@ -1230,7 +1236,7 @@ def render_plan_table(rows: pd.DataFrame) -> str:
         body_rows.append(
             f"""<tr{tr_class}>
                 {day_cell}
-                <td class="sortiment-cell">{html.escape(sortiment)}</td>
+                <td class="sortiment-cell">{html.escape(sort_display)}</td>
                 <td class="bestelltag-cell">{html.escape(bestelltag)}</td>
                 <td class="zeit-cell">{html.escape(zeitende)}</td>
             </tr>"""
