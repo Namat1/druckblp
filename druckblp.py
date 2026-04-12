@@ -2628,8 +2628,10 @@ def main() -> None:
     col_left, col_right = st.columns(2, gap="medium")
     with col_left:
         kunden_file = st.file_uploader("Kundenliste", type=["xlsx", "xls", "xlsm", "csv"],
+                                        key="kunden_upload",
                                         help="Spalten: A, I, J, K, L, M, N")
         sap_file = st.file_uploader("SAP-Datei", type=["xlsx", "xls", "xlsm", "csv"],
+                                     key="sap_upload",
                                      help="Spalten: A, G, H, I, O, P, Y")
         anfahrt_file = st.file_uploader(
             "Anfahrtshinweise (optional)",
@@ -2639,8 +2641,10 @@ def main() -> None:
         )
     with col_right:
         transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
+                                          key="transport_upload",
                                           help="Spalten: A, C")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
+                                              key="kostenstellen_upload",
                                               help="A=Liefertag, B=Tourname, dann Sortiment-Gruppen (Lagerware, AVO, …)")
         foto_files = st.file_uploader(
             "Kunden-Fotos (optional, mehrere)",
