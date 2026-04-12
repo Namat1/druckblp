@@ -2631,22 +2631,24 @@ def main() -> None:
                                         help="Spalten: A, I, J, K, L, M, N")
         sap_file = st.file_uploader("SAP-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                      help="Spalten: A, G, H, I, O, P, Y")
+        anfahrt_file = st.file_uploader(
+            "Anfahrtshinweise (optional)",
+            type=["csv", "xlsx", "xls", "xlsm"],
+            key="anfahrt_upload",
+            help="A=SAP-Nr · B=CSB-Nr (Matchkey) · G=Behälter · H=Anfahrtshinweis · K=Foto-Dateiname",
+        )
     with col_right:
         transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
                                           help="Spalten: A, C")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                               help="A=Liefertag, B=Tourname, dann Sortiment-Gruppen (Lagerware, AVO, …)")
-    anfahrt_file = st.file_uploader(
-        "Anfahrtshinweise (optional, CSV)",
-        type=["csv", "xlsx", "xls", "xlsm"],
-        help="A=Rahmentour · B=CSB-Nr (Matchkey) · G=Behälter · H=Anfahrtshinweis · K=Foto",
-    )
-    foto_files = st.file_uploader(
-        "Kunden-Fotos (optional, mehrere möglich)",
-        type=["jpg", "jpeg", "png", "webp", "gif"],
-        accept_multiple_files=True,
-        help="Dateiname muss dem Eintrag in Spalte K der Anfahrtshinweis-CSV entsprechen (z.B. 40.jpg)",
-    )
+        foto_files = st.file_uploader(
+            "Kunden-Fotos (optional, mehrere)",
+            type=["jpg", "jpeg", "png", "webp", "gif"],
+            accept_multiple_files=True,
+            key="foto_upload",
+            help="Dateiname muss Spalte K der Anfahrts-CSV entsprechen (z.B. 40.jpg)",
+        )
     logo_file = st.file_uploader(
         "Druck-Logo (Sendeplan)",
         type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
