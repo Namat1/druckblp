@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 
-st.set_page_config(
+st.set_page_config(a
     page_title="Sendeplan-Generator",
     page_icon="📦",
     layout="wide",
@@ -115,19 +115,6 @@ UPLOAD_CONFIG = {
         },
         "required": ["Liefertyp_ID", "Liefertyp_Name"],
         "key": "Liefertyp_ID",
-    },
-    "anfahrt": {
-        "label": "Anfahrtshinweise hochladen (optional)",
-        "help": "CSV: A=Rahmentour, B=CSB-Nr (Matchkey), G=Behälter, H=Anfahrtshinweis, K=Foto",
-        "mapping": {
-            "SAP_Nr_CSV":     "A",
-            "CSB_Nr_CSV":     "B",
-            "Behaelter":      "G",
-            "Anfahrtshinweis": "H",
-            "Foto":           "K",
-        },
-        "required": ["CSB_Nr_CSV"],
-        "key": "CSB_Nr_CSV",
     },
 }
 
@@ -471,8 +458,6 @@ def prepare_dataframes(
     kostenstellen_bytes: bytes,
     kostenstellen_name: str,
     csv_separator: str,
-    anfahrt_bytes: Optional[bytes] = None,
-    anfahrt_name: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, int], pd.DataFrame]:
     df_kunden = load_structured_upload(kunden_bytes, kunden_name, csv_separator, "kunden")
     df_sap = load_structured_upload(sap_bytes, sap_name, csv_separator, "sap")
@@ -508,29 +493,6 @@ def prepare_dataframes(
         on="SAP_Nr",
         how="left",
     )
-
-    # Anfahrtshinweise aus optionalem CSV einbinden (Join via CSB_Nr)
-    _anfahrt_cols = ["SAP_Nr_CSV", "Behaelter", "Anfahrtshinweis", "Foto"]
-    if anfahrt_bytes and anfahrt_name:
-        try:
-            df_anfahrt = load_structured_upload(anfahrt_bytes, anfahrt_name, csv_separator, "anfahrt")
-            df_anfahrt = df_anfahrt.rename(columns={"CSB_Nr_CSV": "CSB_Nr"})
-            df_anfahrt["CSB_Nr"] = df_anfahrt["CSB_Nr"].map(normalize_digits)
-            kunden_basis["CSB_Nr"] = kunden_basis["CSB_Nr"].map(normalize_digits)
-            kunden_basis = kunden_basis.merge(
-                df_anfahrt[["CSB_Nr"] + _anfahrt_cols].drop_duplicates("CSB_Nr"),
-                on="CSB_Nr",
-                how="left",
-            )
-        except Exception as exc:
-            st.warning(f"Anfahrtshinweise konnten nicht geladen werden: {exc}")
-            for col in _anfahrt_cols:
-                kunden_basis[col] = ""
-    else:
-        for col in _anfahrt_cols:
-            kunden_basis[col] = ""
-
-    kunden_basis[_anfahrt_cols] = kunden_basis[_anfahrt_cols].fillna("")
 
     # Basis-Merge: Kundenstamm-Spalten an plan_rows anhängen
     plan_rows = df_sap.merge(
@@ -1168,39 +1130,6 @@ def export_css() -> str:
             padding: 5px 8px; border-bottom: 1px solid #f0f4f8; color: #2a3848;
         }
         .src-table tbody tr:hover td { background: #f5f7fa; }
-
-        /* ══════════════════════════════════════
-           ANFAHRTSHINWEIS-BOX
-        ══════════════════════════════════════ */
-        .anfahrt-box {
-            margin-top: 3mm;
-            border: 0.3mm solid #bbb;
-            border-left: 1.2mm solid #e6a100;
-            border-radius: 1.5mm;
-            padding: 2mm 3mm;
-            font-size: 8.5pt;
-            color: #333;
-            background: #fffdf5;
-            line-height: 1.5;
-        }
-        .anfahrt-box-label {
-            font-size: 7.5pt;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #b07800;
-            margin-bottom: 1mm;
-        }
-        .anfahrt-meta {
-            display: flex;
-            gap: 6mm;
-            font-size: 8pt;
-            color: #555;
-            margin-top: 1.5mm;
-            padding-top: 1.5mm;
-            border-top: 0.2mm solid #e0d8c0;
-        }
-        .anfahrt-meta strong { color: #333; margin-right: 1mm; }
     </style>
     """
 
@@ -1368,7 +1297,6 @@ def render_customer_plan(
     logo_b64: str = "",
     logo_mime: str = "image/png",
     bulk_mode: bool = False,
-    photo_map: Optional[Dict[str, str]] = None,
 ) -> str:
     """Rendert eine einzelne Kundenseite exakt nach dem PDF-Vorbild.
     Hinweis: Kundendaten sind bereits in cleanup_dataframe() normalisiert,
@@ -1380,49 +1308,12 @@ def render_customer_plan(
     plz         = str(customer.get("PLZ", ""))
     ort         = str(customer.get("Ort", ""))
     fachberater = str(customer.get("Fachberater", ""))
-    anfahrt_text = str(customer.get("Anfahrtshinweis", "")).strip()
-    behaelter    = str(customer.get("Behaelter", "")).strip()
-    sap_nr_csv   = str(customer.get("SAP_Nr_CSV", "")).strip()
     stand = datetime.now().strftime("%d.%m.%Y")
 
     subtitle = "Standard"  # Immer Standard – per contenteditable änderbar
 
     tour_overview_html = render_tour_overview(customer_rows)
     plan_table_html    = render_plan_table(customer_rows)
-
-    # Anfahrtshinweis-Box nur wenn Inhalt vorhanden
-    if anfahrt_text or behaelter or sap_nr_csv:
-        meta_parts = []
-        if sap_nr_csv:
-            meta_parts.append(f'<span><strong>SAP-Nr.:</strong> {html.escape(sap_nr_csv)}</span>')
-        if behaelter:
-            meta_parts.append(f'<span><strong>Behälter:</strong> {html.escape(behaelter)}</span>')
-        meta_html = (
-            f'<div class="anfahrt-meta">{"".join(meta_parts)}</div>'
-            if meta_parts else ""
-        )
-        # Foto einbetten falls vorhanden
-        foto_filename = str(customer.get("Foto", "")).strip()
-        foto_html = ""
-        if foto_filename and photo_map:
-            foto_data_uri = photo_map.get(foto_filename.lower(), "")
-            if foto_data_uri:
-                foto_html = (
-                    f'<img src="{foto_data_uri}" alt="{html.escape(foto_filename)}" '
-                    f'style="max-width:38mm; max-height:28mm; width:auto; height:auto; '
-                    f'border-radius:2mm; border:0.3mm solid #ddd; margin-top:2mm; display:block;">'
-                )
-        anfahrt_html = f"""
-        <div class="anfahrt-box" style="display:flex; gap:3mm; align-items:flex-start;">
-            <div style="flex:1; min-width:0;">
-                <div class="anfahrt-box-label">&#128205; Anfahrtshinweis</div>
-                <div>{html.escape(anfahrt_text)}</div>
-                {meta_html}
-            </div>
-            {f'<div style="flex-shrink:0;">{foto_html}</div>' if foto_html else ''}
-        </div>"""
-    else:
-        anfahrt_html = ""
 
     return f"""
     <div class="paper">
@@ -1460,9 +1351,6 @@ def render_customer_plan(
 
         <!-- ===== PLANTABELLE ===== -->
         {plan_table_html}
-
-        <!-- ===== ANFAHRTSHINWEIS ===== -->
-        {anfahrt_html}
 
     </div>
     </div>
@@ -1614,7 +1502,7 @@ def _rows_to_list(df: pd.DataFrame, cols: List[str]) -> list:
     return df[avail].fillna("").astype(str).to_dict(orient="records")
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, logo_b64: str = "", logo_mime: str = "image/png", sidebar_logo_b64: str = "", sidebar_logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None, photo_map: Optional[Dict[str, str]] = None) -> str:
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, logo_b64: str = "", logo_mime: str = "image/png", sidebar_logo_b64: str = "", sidebar_logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None) -> str:
     # Logo einmalig als JS-Variable – wird nach DOMContentLoaded auf alle Bilder gesetzt.
     # Spart mehrere MB bei größeren Kundenstämmen (logo_b64 × N Kunden).
     if logo_b64:
@@ -2023,7 +1911,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         entry_parts: List[str] = []
         if include_separators:
             entry_parts.append(render_separator_page(customer))
-        entry_parts.append(render_customer_plan(customer, rows, logo_b64="", logo_mime=logo_mime, bulk_mode=True, photo_map=photo_map))
+        entry_parts.append(render_customer_plan(customer, rows, logo_b64="", logo_mime=logo_mime, bulk_mode=True))
 
         cust_name_escaped = html.escape(str(customer.get("Name", "")).lower())
         docs_buffer.write(
@@ -2546,22 +2434,6 @@ def show_customer_preview(customer: pd.Series, customer_rows: pd.DataFrame) -> N
     )
     st.write(f"**Adresse:** {address or '-'}")
 
-    # Anfahrtsdaten anzeigen falls vorhanden
-    anfahrt = normalize_text(customer.get("Anfahrtshinweis", ""))
-    behaelter = normalize_text(customer.get("Behaelter", ""))
-    sap_nr_csv = normalize_text(customer.get("SAP_Nr_CSV", ""))
-    if anfahrt or behaelter or sap_nr_csv:
-        with st.expander("📍 Anfahrtshinweis", expanded=True):
-            if anfahrt:
-                st.write(anfahrt)
-            meta = []
-            if sap_nr_csv:
-                meta.append(f"**SAP-Nr. (CSV):** {sap_nr_csv}")
-            if behaelter:
-                meta.append(f"**Behälter:** {behaelter}")
-            if meta:
-                st.caption("  ·  ".join(meta))
-
     st.markdown("#### Planliste")
     if customer_rows.empty:
         st.warning("Für diesen Kunden sind aktuell keine Planzeilen vorhanden.")
@@ -2628,31 +2500,14 @@ def main() -> None:
     col_left, col_right = st.columns(2, gap="medium")
     with col_left:
         kunden_file = st.file_uploader("Kundenliste", type=["xlsx", "xls", "xlsm", "csv"],
-                                        key="kunden_upload",
                                         help="Spalten: A, I, J, K, L, M, N")
         sap_file = st.file_uploader("SAP-Datei", type=["xlsx", "xls", "xlsm", "csv"],
-                                     key="sap_upload",
                                      help="Spalten: A, G, H, I, O, P, Y")
-        anfahrt_file = st.file_uploader(
-            "Anfahrtshinweise (optional)",
-            type=["csv", "xlsx", "xls", "xlsm"],
-            key="anfahrt_upload",
-            help="A=SAP-Nr · B=CSB-Nr (Matchkey) · G=Behälter · H=Anfahrtshinweis · K=Foto-Dateiname",
-        )
     with col_right:
         transport_file = st.file_uploader("Transportgruppen", type=["xlsx", "xls", "xlsm", "csv"],
-                                          key="transport_upload",
                                           help="Spalten: A, C")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
-                                              key="kostenstellen_upload",
                                               help="A=Liefertag, B=Tourname, dann Sortiment-Gruppen (Lagerware, AVO, …)")
-        foto_files = st.file_uploader(
-            "Kunden-Fotos (optional, mehrere)",
-            type=["jpg", "jpeg", "png", "webp", "gif"],
-            accept_multiple_files=True,
-            key="foto_upload",
-            help="Dateiname muss Spalte K der Anfahrts-CSV entsprechen (z.B. 40.jpg)",
-        )
     logo_file = st.file_uploader(
         "Druck-Logo (Sendeplan)",
         type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
@@ -2685,24 +2540,10 @@ def main() -> None:
         st.info("Alle 4 Dateien hochladen, dann erscheint der Button.")
         return
 
-    # ── Foto-Map aufbauen: {dateiname_lower -> data_uri} ──
-    photo_map: Dict[str, str] = {}
-    for _f in (foto_files or []):
-        _ext = _f.name.rsplit(".", 1)[-1].lower()
-        _mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                 "webp": "image/webp", "gif": "image/gif"}.get(_ext, "image/jpeg")
-        _b64 = base64.b64encode(_f.getvalue()).decode("utf-8")
-        photo_map[_f.name.lower()] = f"data:{_mime};base64,{_b64}"
-
     # ── Daten verarbeiten (csv_separator kommt aus Selectbox oben) ──
     try:
         _hasher = hashlib.md5()
         for _f in (kunden_file, sap_file, transport_file, kostenstellen_file):
-            _hasher.update(_f.getvalue())
-        if anfahrt_file:
-            _hasher.update(anfahrt_file.getvalue())
-        for _f in (foto_files or []):
-            _hasher.update(_f.name.encode())
             _hasher.update(_f.getvalue())
         _hasher.update(csv_separator.encode())
         _cache_key = _hasher.hexdigest()
@@ -2714,8 +2555,6 @@ def main() -> None:
                 transport_file.getvalue(), transport_file.name,
                 kostenstellen_file.getvalue(), kostenstellen_file.name,
                 csv_separator,
-                anfahrt_bytes=anfahrt_file.getvalue() if anfahrt_file else None,
-                anfahrt_name=anfahrt_file.name if anfahrt_file else None,
             )
             st.session_state["_df_cache_key"] = _cache_key
             st.session_state["_df_cache_result"] = _result
@@ -2783,7 +2622,6 @@ def main() -> None:
                     logo_b64=logo_b64, logo_mime=logo_mime,
                     sidebar_logo_b64=sidebar_logo_b64, sidebar_logo_mime=sidebar_logo_mime,
                     debug_data=debug_reports,
-                    photo_map=photo_map if photo_map else None,
                 )
             progress.progress(100, text="Fertig!")
             st.session_state["_export_html"] = bulk_html
