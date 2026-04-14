@@ -13,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 
-st.set_page_config(a
+st.set_page_config(
     page_title="Sendeplan-Generator",
     page_icon="📦",
     layout="wide",
@@ -375,6 +375,63 @@ def extract_zusatz_schedule(file_bytes: bytes, filename: str) -> pd.DataFrame:
     return pd.DataFrame(records) if records else pd.DataFrame(
         columns=["ksp_schluessel","liefertag","sortiment","bestelltag","bestellzeitende"]
     )
+
+
+def extract_massendruck_data(file_bytes: bytes, filename: str) -> dict:
+    """Liest Tournummern aus einer Excel-Datei (Blatt 1–4).
+
+    Spalte B (Index 1) = SAP-Nummer
+    Spalte G–L (Indizes 6–11) = Tournummern für Mo–Sa (Tag 1–6)
+
+    Returns: {sap_nr_lowercase: {"1": tour, "2": tour, …}}
+    Wird direkt als ``massendruck_data`` an ``build_full_document_html`` übergeben.
+    """
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(file_bytes), read_only=True)
+    except Exception as exc:
+        raise ValueError(
+            f"Tournummern-Datei konnte nicht als Excel gelesen werden ({filename}): {exc}"
+        ) from exc
+
+    result: Dict[str, Dict[str, str]] = {}
+
+    # Bis zu 4 Sheets verarbeiten (Index 0-3)
+    sheets_to_read = min(4, len(wb.sheetnames))
+    for sheet_idx in range(sheets_to_read):
+        ws = wb[wb.sheetnames[sheet_idx]]
+        for row in ws.iter_rows(values_only=True):
+            if not row or len(row) < 7:
+                continue
+
+            # Spalte B = Index 1 → SAP-Nummer
+            sap_raw = row[1]
+            if sap_raw is None:
+                continue
+            sap_str = str(sap_raw).strip()
+            # Float-Artefakte entfernen: "1234567.0" → "1234567"
+            if re.match(r'^\d+\.0$', sap_str):
+                sap_str = sap_str[:-2]
+            if not sap_str or not any(ch.isdigit() for ch in sap_str):
+                continue
+
+            sap_key = sap_str.lower()  # data-sap im HTML ist lowercase
+
+            if sap_key not in result:
+                result[sap_key] = {}
+
+            # Spalten G–L = Indizes 6–11 → Tag 1 (Mo) bis 6 (Sa)
+            for day_num, col_idx in enumerate([6, 7, 8, 9, 10, 11], start=1):
+                if col_idx >= len(row) or row[col_idx] is None:
+                    continue
+                val = str(row[col_idx]).strip()
+                if re.match(r'^\d+\.0$', val):
+                    val = val[:-2]
+                if val and val != "0" and val.lower() not in ("", "nan", "none"):
+                    # Bei Mehrfach-Sheets: spätere Einträge überschreiben nur wenn leer
+                    if str(day_num) not in result[sap_key]:
+                        result[sap_key][str(day_num)] = val
+
+    return result
 
 
 def build_zusatz_plan_rows(plan_rows: pd.DataFrame, zusatz_schedule: pd.DataFrame) -> pd.DataFrame:
@@ -2508,12 +2565,24 @@ def main() -> None:
                                           help="Spalten: A, C")
         kostenstellen_file = st.file_uploader("Kostenstellen-Datei", type=["xlsx", "xls", "xlsm", "csv"],
                                               help="A=Liefertag, B=Tourname, dann Sortiment-Gruppen (Lagerware, AVO, …)")
-    logo_file = st.file_uploader(
-        "Druck-Logo (Sendeplan)",
-        type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
-        key="print_logo",
-        help="Logo oben rechts auf jedem gedruckten Sendeplan (unabhängig vom App-Logo)",
-    )
+
+    # ── Zusätzlicher Upload: Tournummern für Massendruck-Sortierung ──
+    col_tour, col_logo = st.columns(2, gap="medium")
+    with col_tour:
+        tournummern_file = st.file_uploader(
+            "Tournummern-Datei (Massendruck)",
+            type=["xlsx", "xls", "xlsm"],
+            key="tournummern_upload",
+            help="Blätter 1–4: Spalte B = SAP-Nr, Spalten G–L = Tournummern Mo–Sa. "
+                 "Ermöglicht die Sortierung im Massendruck nach Liefertag.",
+        )
+    with col_logo:
+        logo_file = st.file_uploader(
+            "Druck-Logo (Sendeplan)",
+            type=["png", "jpg", "jpeg", "svg", "gif", "webp"],
+            key="print_logo",
+            help="Logo oben rechts auf jedem gedruckten Sendeplan (unabhängig vom App-Logo)",
+        )
 
     upload_map = {
         "kunden": kunden_file, "sap": sap_file, "transport": transport_file,
@@ -2534,6 +2603,10 @@ def main() -> None:
                   for k, v in upload_map.items()]
     labels = ["Kunden", "SAP", "Transport", "Kostenstellen"]
     status_parts = [f"{l}: {f}" for l, f in zip(labels, file_names)]
+    # Tournummern-Status (optional, aber informativ)
+    tour_status = (f'<span class="status-ok">✓ {html.escape(tournummern_file.name)}</span>'
+                   if tournummern_file else '<span style="color:#888;font-size:0.85rem">– optional</span>')
+    status_parts.append(f"Tournummern: {tour_status}")
     st.markdown(f"<p style='font-size:0.85rem;margin:0.5rem 0;'>{'&ensp;·&ensp;'.join(status_parts)}</p>", unsafe_allow_html=True)
 
     if not all_required_uploads_present(upload_map):
@@ -2565,6 +2638,22 @@ def main() -> None:
     except Exception as exc:
         st.error(f"Fehler beim Verarbeiten: {exc}")
         return
+
+    # ── Tournummern / Massendruck-Daten verarbeiten (optional) ──
+    massendruck_data: Optional[dict] = None
+    if tournummern_file is not None:
+        _tour_hash = hashlib.md5(tournummern_file.getvalue()).hexdigest()
+        if st.session_state.get("_tour_cache_key") != _tour_hash:
+            try:
+                _md_data = extract_massendruck_data(
+                    tournummern_file.getvalue(), tournummern_file.name,
+                )
+                st.session_state["_tour_cache_key"] = _tour_hash
+                st.session_state["_tour_cache_result"] = _md_data
+                st.session_state["_export_ready"] = False
+            except Exception as exc:
+                st.warning(f"Tournummern-Datei Fehler: {exc}")
+        massendruck_data = st.session_state.get("_tour_cache_result")
 
     # Debug-Reports cachen
     _data_key = st.session_state.get("_df_cache_key", "")
@@ -2601,9 +2690,13 @@ def main() -> None:
 
     # ── Tab: Export ──
     with tab_plan:
-        st.markdown(
-            f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen"
-        )
+        _info_parts = [f"**{len(customers_df)} Kunden** · {len(plan_rows_df)} Planzeilen"]
+        if massendruck_data:
+            _n_tours = sum(1 for v in massendruck_data.values() if v)
+            _info_parts.append(f"🔀 Massendruck: {_n_tours} Tournummern-Zuordnungen geladen")
+        else:
+            _info_parts.append("ℹ️ Tournummern-Datei hochladen für Massendruck-Sortierung")
+        st.markdown(" · ".join(_info_parts))
 
         include_sep = st.checkbox(
             "Trennseiten einfügen (Separator-Pages vor jedem Kunden)",
@@ -2622,6 +2715,7 @@ def main() -> None:
                     logo_b64=logo_b64, logo_mime=logo_mime,
                     sidebar_logo_b64=sidebar_logo_b64, sidebar_logo_mime=sidebar_logo_mime,
                     debug_data=debug_reports,
+                    massendruck_data=massendruck_data,
                 )
             progress.progress(100, text="Fertig!")
             st.session_state["_export_html"] = bulk_html
