@@ -1750,10 +1750,10 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         @media print { .md-section, .md-overlay { display: none !important; } }
         .md-tour-inline {
             font-family: 'Courier New', monospace;
-            font-size: 9pt;
-            font-weight: 700;
-            color: #1a5a9e;
-            letter-spacing: 0.06em;
+            font-size: 7pt;
+            font-weight: 400;
+            color: #bbb;
+            letter-spacing: 0.04em;
             margin-left: auto;
         }
         @media screen { .md-tour-inline { display: none !important; } }
@@ -1937,70 +1937,49 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 var cover = document.getElementById('md-cover');
                 if (!cover) return;
 
-                // Gruppen aufbauen
-                var groups = {};  // { label: [items] }
-                var pKey = 'Prim\u00e4r \u2013 ' + pdName;
-                groups[pKey] = [];
-                var secGroups = {};
-                var uItems = [];
+                // Gruppen z\u00e4hlen
+                var pCount = 0;
+                var secByDay = {};   // { dayNum: { name, count } }
+                var uCount = 0;
 
-                ordered.forEach(function(o, i) {
-                    var item = { nr: i+1, name: o.name, sap: o.sap, tour: o.pt || o.st || '' };
-                    if (o.prio === 0) {
-                        groups[pKey].push(item);
-                    } else if (o.prio === 1) {
-                        var dName = MD.days[String(o.stDay)] || ('Tag ' + o.stDay);
-                        var sKey = 'Sekund\u00e4r \u2013 ' + dName;
-                        if (!secGroups[sKey]) secGroups[sKey] = [];
-                        secGroups[sKey].push(item);
-                    } else {
-                        uItems.push(item);
-                    }
+                ordered.forEach(function(o) {
+                    if (o.prio === 0) { pCount++; }
+                    else if (o.prio === 1) {
+                        var d = String(o.stDay);
+                        if (!secByDay[d]) secByDay[d] = { name: MD.days[d] || ('Tag ' + d), count: 0 };
+                        secByDay[d].count++;
+                    } else { uCount++; }
                 });
 
-                // Stats
-                var pCount = groups[pKey].length;
-                var sCount = 0;
-                var sDays = Object.keys(secGroups).sort();
-                sDays.forEach(function(k) { sCount += secGroups[k].length; });
-                var uCount = uItems.length;
+                var sDays = Object.keys(secByDay).sort(function(a,b){ return parseInt(a)-parseInt(b); });
+                var sTotal = 0;
+                sDays.forEach(function(d){ sTotal += secByDay[d].count; });
 
                 var h = '';
-                h += '<div class="md-cover-title">Massendruck \u2013 Druckreihenfolge</div>';
-                h += '<div class="md-cover-subtitle">Sortiert nach: ' + escHtml(pdName) + ' &middot; ' + ordered.length + ' Kunden &middot; ' + new Date().toLocaleDateString('de-DE') + '</div>';
+                h += '<div class="md-cover-title">Massendruck \u2013 \u00dcbersicht</div>';
+                h += '<div class="md-cover-subtitle">Prim\u00e4rtag: ' + escHtml(pdName) + ' &middot; ' + new Date().toLocaleDateString('de-DE') + '</div>';
 
-                // Statistik-Zeile
-                h += '<div class="md-cover-stats">';
-                h += '<span class="cv-p">\u25cf Prim\u00e4r (' + escHtml(pdName) + '): ' + pCount + '</span>';
-                sDays.forEach(function(k) {
-                    h += ' &nbsp;\u2502&nbsp; <span class="cv-s">\u21b3 ' + escHtml(k) + ': ' + secGroups[k].length + '</span>';
-                });
-                h += ' &nbsp;\u2502&nbsp; <span class="cv-u">\u25cf Keine Tour: ' + uCount + '</span>';
-                h += '</div>';
-
-                // Tabelle
+                // Zusammenfassungstabelle
                 h += '<table><thead><tr>';
-                h += '<th style="width:8mm">#</th><th>Kundenname</th><th style="width:20mm">SAP-Nr</th>';
-                h += '<th style="width:18mm">Tour</th><th style="width:24mm">Kategorie</th>';
+                h += '<th>Kategorie</th><th style="width:22mm;text-align:right">Anzahl</th>';
                 h += '</tr></thead><tbody>';
 
-                function addGroupRows(label, items, prioClass) {
-                    if (items.length === 0) return;
-                    h += '<tr class="cv-group-header"><td colspan="5">' + escHtml(label) + ' (' + items.length + ')</td></tr>';
-                    items.forEach(function(it) {
-                        h += '<tr>';
-                        h += '<td class="cv-nr">' + it.nr + '</td>';
-                        h += '<td>' + escHtml(it.name) + '</td>';
-                        h += '<td>' + escHtml(it.sap) + '</td>';
-                        h += '<td class="cv-tour">' + escHtml(it.tour) + '</td>';
-                        h += '<td class="' + prioClass + '">' + escHtml(label.split(' \u2013 ')[0]) + '</td>';
-                        h += '</tr>';
-                    });
+                h += '<tr><td class="cv-prio-p" style="font-size:10pt">\u25cf Prim\u00e4r (' + escHtml(pdName) + ')</td>';
+                h += '<td style="text-align:right;font-size:10pt;font-weight:700">' + pCount + '</td></tr>';
+
+                sDays.forEach(function(d) {
+                    h += '<tr><td class="cv-prio-s" style="font-size:10pt;padding-left:6mm">\u21b3 Sekund\u00e4r ' + escHtml(secByDay[d].name) + '</td>';
+                    h += '<td style="text-align:right;font-size:10pt;font-weight:700">' + secByDay[d].count + '</td></tr>';
+                });
+
+                if (uCount > 0) {
+                    h += '<tr><td class="cv-prio-u" style="font-size:10pt">\u25cf Keine Tour</td>';
+                    h += '<td style="text-align:right;font-size:10pt;font-weight:700">' + uCount + '</td></tr>';
                 }
 
-                addGroupRows(pKey, groups[pKey], 'cv-prio-p');
-                sDays.forEach(function(k) { addGroupRows(k, secGroups[k], 'cv-prio-s'); });
-                if (uItems.length > 0) addGroupRows('Keine Tour', uItems, 'cv-prio-u');
+                // Summe
+                h += '<tr style="border-top:0.4mm solid #333"><td style="font-size:10pt;font-weight:800;padding-top:2mm">Gesamt</td>';
+                h += '<td style="text-align:right;font-size:10pt;font-weight:800;padding-top:2mm">' + ordered.length + '</td></tr>';
 
                 h += '</tbody></table>';
 
