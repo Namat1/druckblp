@@ -1757,6 +1757,84 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
             margin-left: auto;
         }
         @media screen { .md-tour-inline { display: none !important; } }
+
+        /* ── Massendruck Deckblatt (Cover Page) ── */
+        .md-cover {
+            display: none;
+        }
+        @media print {
+            .md-cover.has-content {
+                display: block;
+                width: 210mm;
+                min-height: 297mm;
+                margin: 0;
+                padding: 12mm 15mm;
+                background: #fff;
+                page-break-after: always;
+                break-after: page;
+                box-sizing: border-box;
+            }
+            .md-cover-title {
+                font-size: 18pt;
+                font-weight: 800;
+                color: #111;
+                margin-bottom: 2mm;
+            }
+            .md-cover-subtitle {
+                font-size: 11pt;
+                color: #555;
+                margin-bottom: 5mm;
+                padding-bottom: 3mm;
+                border-bottom: 0.5mm solid #ccc;
+            }
+            .md-cover-stats {
+                font-size: 9pt;
+                line-height: 2;
+                margin-bottom: 4mm;
+                color: #333;
+            }
+            .md-cover-stats .cv-p { color: #1a7f3c; font-weight: 700; }
+            .md-cover-stats .cv-s { color: #1a60b0; font-weight: 700; }
+            .md-cover-stats .cv-u { color: #999; }
+            .md-cover table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 8pt;
+            }
+            .md-cover thead th {
+                border-bottom: 0.4mm solid #333;
+                padding: 1.5mm 2mm;
+                text-align: left;
+                font-weight: 700;
+                font-size: 7.5pt;
+                color: #333;
+                text-transform: uppercase;
+                letter-spacing: 0.05em;
+            }
+            .md-cover tbody td {
+                border-bottom: 0.2mm solid #ddd;
+                padding: 1.2mm 2mm;
+                vertical-align: top;
+                color: #222;
+            }
+            .md-cover tbody tr.cv-group-header td {
+                border-top: 0.4mm solid #666;
+                padding-top: 2.5mm;
+                font-weight: 700;
+                font-size: 8.5pt;
+                color: #111;
+                background: #f5f5f5;
+            }
+            .md-cover .cv-nr { width: 8mm; text-align: right; color: #888; padding-right: 3mm; }
+            .md-cover .cv-tour { font-family: 'Courier New', monospace; font-weight: 700; }
+            .md-cover .cv-prio-p { color: #1a7f3c; font-weight: 600; }
+            .md-cover .cv-prio-s { color: #1a60b0; font-weight: 600; }
+            .md-cover .cv-prio-u { color: #aaa; }
+        }
+        /* Screen: Deckblatt-Vorschau im Overlay (optional) */
+        @media screen {
+            .md-cover { display: none !important; }
+        }
         """
 
         massendruck_js = """
@@ -1855,6 +1933,81 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 return ordered.length;
             }
 
+            function buildCoverPage(ordered, pdName) {
+                var cover = document.getElementById('md-cover');
+                if (!cover) return;
+
+                // Gruppen aufbauen
+                var groups = {};  // { label: [items] }
+                var pKey = 'Prim\u00e4r \u2013 ' + pdName;
+                groups[pKey] = [];
+                var secGroups = {};
+                var uItems = [];
+
+                ordered.forEach(function(o, i) {
+                    var item = { nr: i+1, name: o.name, sap: o.sap, tour: o.pt || o.st || '' };
+                    if (o.prio === 0) {
+                        groups[pKey].push(item);
+                    } else if (o.prio === 1) {
+                        var dName = MD.days[String(o.stDay)] || ('Tag ' + o.stDay);
+                        var sKey = 'Sekund\u00e4r \u2013 ' + dName;
+                        if (!secGroups[sKey]) secGroups[sKey] = [];
+                        secGroups[sKey].push(item);
+                    } else {
+                        uItems.push(item);
+                    }
+                });
+
+                // Stats
+                var pCount = groups[pKey].length;
+                var sCount = 0;
+                var sDays = Object.keys(secGroups).sort();
+                sDays.forEach(function(k) { sCount += secGroups[k].length; });
+                var uCount = uItems.length;
+
+                var h = '';
+                h += '<div class="md-cover-title">Massendruck \u2013 Druckreihenfolge</div>';
+                h += '<div class="md-cover-subtitle">Sortiert nach: ' + escHtml(pdName) + ' &middot; ' + ordered.length + ' Kunden &middot; ' + new Date().toLocaleDateString('de-DE') + '</div>';
+
+                // Statistik-Zeile
+                h += '<div class="md-cover-stats">';
+                h += '<span class="cv-p">\u25cf Prim\u00e4r (' + escHtml(pdName) + '): ' + pCount + '</span>';
+                sDays.forEach(function(k) {
+                    h += ' &nbsp;\u2502&nbsp; <span class="cv-s">\u21b3 ' + escHtml(k) + ': ' + secGroups[k].length + '</span>';
+                });
+                h += ' &nbsp;\u2502&nbsp; <span class="cv-u">\u25cf Keine Tour: ' + uCount + '</span>';
+                h += '</div>';
+
+                // Tabelle
+                h += '<table><thead><tr>';
+                h += '<th style="width:8mm">#</th><th>Kundenname</th><th style="width:20mm">SAP-Nr</th>';
+                h += '<th style="width:18mm">Tour</th><th style="width:24mm">Kategorie</th>';
+                h += '</tr></thead><tbody>';
+
+                function addGroupRows(label, items, prioClass) {
+                    if (items.length === 0) return;
+                    h += '<tr class="cv-group-header"><td colspan="5">' + escHtml(label) + ' (' + items.length + ')</td></tr>';
+                    items.forEach(function(it) {
+                        h += '<tr>';
+                        h += '<td class="cv-nr">' + it.nr + '</td>';
+                        h += '<td>' + escHtml(it.name) + '</td>';
+                        h += '<td>' + escHtml(it.sap) + '</td>';
+                        h += '<td class="cv-tour">' + escHtml(it.tour) + '</td>';
+                        h += '<td class="' + prioClass + '">' + escHtml(label.split(' \u2013 ')[0]) + '</td>';
+                        h += '</tr>';
+                    });
+                }
+
+                addGroupRows(pKey, groups[pKey], 'cv-prio-p');
+                sDays.forEach(function(k) { addGroupRows(k, secGroups[k], 'cv-prio-s'); });
+                if (uItems.length > 0) addGroupRows('Keine Tour', uItems, 'cv-prio-u');
+
+                h += '</tbody></table>';
+
+                cover.innerHTML = h;
+                cover.classList.add('has-content');
+            }
+
             function applyMassendruck(primaryDay) {
                 activeMdDay = primaryDay;
                 var pdName = MD.days[String(primaryDay)] || ('Tag ' + primaryDay);
@@ -1872,7 +2025,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                     if (!span) return;
                     var tour = o.pt || o.st || '';
                     span.style.display = '';
-                    span.textContent = tour ? 'Tour: ' + tour : '';
+                    span.textContent = tour || '';
                 });
 
                 var stats = document.getElementById('md-stats');
@@ -1887,6 +2040,9 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
                 document.querySelectorAll('.md-day-btn').forEach(function(b) {
                     b.classList.toggle('active', parseInt(b.getAttribute('data-day')) === primaryDay);
                 });
+
+                // Deckblatt generieren
+                buildCoverPage(lastOrdered, pdName);
             }
 
             window.openMdOverlay = function() {
@@ -2436,6 +2592,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     <body>
         {render_export_search_toolbar(massendruck_sidebar_section, logo_b64=sidebar_logo_b64, logo_mime=sidebar_logo_mime)}
         <div class="main-content">
+        <div id="md-cover" class="md-cover"></div>
         <div class="page-stack">
         {docs_buffer.getvalue()}
         </div>
