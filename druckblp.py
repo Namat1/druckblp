@@ -1738,7 +1738,7 @@ def render_validation_cover(
     """
 
 
-def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, logo_b64: str = "", logo_mime: str = "image/png", sidebar_logo_b64: str = "", sidebar_logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None, df_sap_raw: Optional[pd.DataFrame] = None, file_names: Optional[Dict[str, str]] = None) -> str:
+def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, include_separators: bool = False, skip_empty_pages: bool = False, logo_b64: str = "", logo_mime: str = "image/png", sidebar_logo_b64: str = "", sidebar_logo_mime: str = "image/png", debug_data: Optional[Dict[str, pd.DataFrame]] = None, massendruck_data: Optional[dict] = None, df_sap_raw: Optional[pd.DataFrame] = None, file_names: Optional[Dict[str, str]] = None) -> str:
     # Logo einmalig als JS-Variable – wird nach DOMContentLoaded auf alle Bilder gesetzt.
     # Spart mehrere MB bei größeren Kundenstämmen (logo_b64 × N Kunden).
     if logo_b64:
@@ -2257,6 +2257,7 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
     _plan_grouped = {sap: grp for sap, grp in plan_rows.groupby("SAP_Nr")}
 
     entry_count = 0
+    skipped_count = 0
     for _, customer in customers.iterrows():
         sap = customer.get("SAP_Nr", "")
         rows = _plan_grouped.get(sap, pd.DataFrame(columns=plan_rows.columns)).copy()
@@ -2265,6 +2266,14 @@ def build_full_document_html(customers: pd.DataFrame, plan_rows: pd.DataFrame, i
         sortimente_text = " ".join(sorted({
             normalize_text(v) for v in rows.get("Sortiment", pd.Series(dtype=str)).tolist() if normalize_text(v)
         }))
+
+        # Leere Seiten überspringen: Kunden ohne Planzeilen oder ohne Transportgruppe
+        if skip_empty_pages:
+            has_transportgruppe = rows.shape[0] > 0 and sortimente_text.strip() != ""
+            if not has_transportgruppe:
+                skipped_count += 1
+                continue
+
         search_blob = " ".join(
             part for part in [
                 sap, csb_nr,
@@ -3047,14 +3056,38 @@ def main() -> None:
             help="Fügt vor jede Kundenseite ein A4-Deckblatt mit Name und SAP-Nr. ein.",
         )
 
+        # Leere Seiten erkennen: Kunden ohne Transportgruppe / Planzeilen
+        _plan_grouped_check = {sap: grp for sap, grp in plan_rows_df.groupby("SAP_Nr")}
+        _n_empty = 0
+        for _, _cust in customers_df.iterrows():
+            _sap = _cust.get("SAP_Nr", "")
+            _crows = _plan_grouped_check.get(_sap, pd.DataFrame())
+            if _crows.empty:
+                _n_empty += 1
+            else:
+                _sort_vals = {normalize_text(v) for v in _crows.get("Sortiment", pd.Series(dtype=str)).tolist() if normalize_text(v)}
+                if not _sort_vals:
+                    _n_empty += 1
+
+        skip_empty = st.checkbox(
+            f"Leere Seiten ausblenden ({_n_empty} Kunden ohne Transportgruppe)",
+            value=_n_empty > 0,
+            help=(
+                f"{_n_empty} Kunden haben keine Transportgruppe / Planzeilen. "
+                "Aktiviert: diese Seiten werden im Export übersprungen."
+            ),
+            disabled=_n_empty == 0,
+        )
+
         if st.button("⚡ Plan generieren", use_container_width=True, type="primary"):
             progress = st.progress(0, text="Vorbereitung …")
-            n = len(customers_df)
+            _n_export = len(customers_df) - (_n_empty if skip_empty else 0)
             # Fortschritt: HTML-Build mit Zwischenmeldungen
-            with st.spinner(f"Generiere HTML für {n} Kunden …"):
+            with st.spinner(f"Generiere HTML für {_n_export} Kunden …"):
                 bulk_html = build_full_document_html(
                     customers_df, plan_rows_df,
                     include_separators=include_sep,
+                    skip_empty_pages=skip_empty,
                     logo_b64=logo_b64, logo_mime=logo_mime,
                     sidebar_logo_b64=sidebar_logo_b64, sidebar_logo_mime=sidebar_logo_mime,
                     debug_data=debug_reports,
@@ -3071,7 +3104,8 @@ def main() -> None:
             progress.progress(100, text="Fertig!")
             st.session_state["_export_html"] = bulk_html
             st.session_state["_export_ready"] = True
-            st.toast(f"✅ HTML für {n} Kunden generiert!", icon="📦")
+            _skip_info = f" · {_n_empty} leere Seiten übersprungen" if skip_empty and _n_empty > 0 else ""
+            st.toast(f"✅ HTML für {_n_export} Kunden generiert!{_skip_info}", icon="📦")
 
         if st.session_state.get("_export_ready"):
             html_bytes = st.session_state["_export_html"].encode("utf-8")
